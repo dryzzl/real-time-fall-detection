@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "real-time-fall-detection"
+version = "0.1.0.dev1"
+description = "A staged Python project for real-time pose-based fall detection."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+fall-detection = "fall_detection.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

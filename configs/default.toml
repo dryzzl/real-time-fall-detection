@@ -1,0 +1,6 @@
+# Synthetic input settings for the foundation milestone.
+[runtime]
+width = 320
+height = 180
+fps = 30.0
+frames = 60
