@@ -20,6 +20,7 @@ class FramePacket:
     height: int
     bgr: bytes = field(repr=False)
     source: str = "synthetic"
+    timestamp_basis: str = "synthetic_fps"
 
     def __post_init__(self) -> None:
         if type(self.index) is not int or self.index < 0:
@@ -32,6 +33,8 @@ class FramePacket:
             raise ValueError("frame must contain exactly width * height * 3 BGR bytes")
         if not isinstance(self.source, str) or not self.source.strip():
             raise ValueError("frame source must be a nonempty string")
+        if not isinstance(self.timestamp_basis, str) or not self.timestamp_basis.strip():
+            raise ValueError("timestamp basis must be a nonempty string")
 
 
 @dataclass(frozen=True)

@@ -34,6 +34,7 @@ def run_pipeline(
     *,
     predictor: Predictor | None = None,
     realtime: bool = False,
+    on_frame: Callable[[FramePacket, Prediction], bool] | None = None,
     clock: Callable[[], float] = time.perf_counter,
     sleep: Callable[[float], None] = time.sleep,
 ) -> RunSummary:
@@ -63,6 +64,7 @@ def run_pipeline(
             "source": frame.source,
             "frame_index": frame.index,
             "timestamp_seconds": frame.timestamp_seconds,
+            "timestamp_basis": frame.timestamp_basis,
             "width": frame.width,
             "height": frame.height,
             "state": result.state.value,
@@ -72,6 +74,8 @@ def run_pipeline(
         count += 1
         last_index = frame.index
         last_timestamp = frame.timestamp_seconds
+        if on_frame is not None and not on_frame(frame, result):
+            break
     elapsed = max(0.0, clock() - start)
     return RunSummary(
         frames_processed=count,
