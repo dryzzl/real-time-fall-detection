@@ -10,6 +10,7 @@ from . import __version__
 from .capture import CaptureConfig, CaptureError, open_capture
 from .config import load_config
 from .pipeline import run_pipeline
+from .pose import OnnxPoseEstimator, PoseError, load_pose_config
 from .sources import synthetic_frames
 from .preview import Preview
 
@@ -38,17 +39,44 @@ def main(argv: list[str] | None = None) -> int:
     display.add_argument("--preview", action="store_true", help="Show a local window; Q/Esc or closing it stops capture")
     display.add_argument("--headless", action="store_true", help="No display (the default)")
     capture.add_argument("--output", type=Path, help="Write metadata JSONL to a new file")
+    pose = commands.add_parser("pose-check", help="Validate a supported ONNX pose model contract")
+    pose.add_argument("--config", type=Path, help="Pose TOML configuration")
+    pose.add_argument("--model", type=Path, help="Local YOLO11-pose ONNX model path")
+    pose.add_argument("--input-width", type=int)
+    pose.add_argument("--input-height", type=int)
+    pose.add_argument("--keypoint-count", type=int)
+    pose.add_argument("--confidence-threshold", type=float)
+    pose.add_argument("--iou-threshold", type=float)
+    pose.add_argument("--smoke", action="store_true", help="Run one black frame through the model")
     args = parser.parse_args(argv)
     if args.command == "status":
         print(json.dumps({
-            "version": __version__, "milestone": "2/10",
+            "version": __version__, "milestone": "3/10",
             "implemented": ["configuration", "frame_contract", "synthetic_stream", "pipeline", "jsonl_output",
-                            "webcam_input", "local_video_input", "optional_preview", "headless_capture"],
+                            "webcam_input", "local_video_input", "optional_preview", "headless_capture",
+                            "onnx_pose_adapter", "letterbox_preprocessing", "pose_output_decoding"],
             "fall_detection_available": False,
-            "next": "onnx_pose_adapter",
+            "next": "person_tracking",
         }))
         return 0
     try:
+        if args.command == "pose-check":
+            pose_config = load_pose_config(
+                args.config, model_path=args.model, input_width=args.input_width,
+                input_height=args.input_height, keypoint_count=args.keypoint_count,
+                confidence_threshold=args.confidence_threshold, iou_threshold=args.iou_threshold,
+            )
+            estimator = OnnxPoseEstimator(pose_config)
+            result = {"event": "pose_model_check", **estimator.describe(), "smoke_run": False}
+            if args.smoke:
+                from .contracts import FramePacket
+                frame = FramePacket(0, 0.0, pose_config.input_width, pose_config.input_height,
+                                    b"\0" * (pose_config.input_width * pose_config.input_height * 3),
+                                    source="pose_contract_smoke")
+                result.update(smoke_run=True, smoke_frame="black_test_frame",
+                              pose_count=len(estimator.estimate(frame)))
+            print(json.dumps(result, allow_nan=False))
+            return 0
         if args.command == "demo":
             config = load_config(args.config, frames=args.frames, fps=args.fps, width=args.width, height=args.height)
         else:
@@ -80,6 +108,6 @@ def main(argv: list[str] | None = None) -> int:
     except KeyboardInterrupt:
         print("Interrupted; any completed output records have been preserved.", file=sys.stderr)
         return 130
-    except (ValueError, OSError, CaptureError) as error:
+    except (ValueError, OSError, CaptureError, PoseError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 2

@@ -4,15 +4,17 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "real-time-fall-detection"
-version = "0.1.0.dev2"
+version = "0.1.0.dev3"
 description = "A staged Python project for real-time pose-based fall detection."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = []
 
 [project.optional-dependencies]
-video = ["opencv-python>=4.10,<5", "numpy>=1.26,<3"]
-headless = ["opencv-python-headless>=4.10,<5", "numpy>=1.26,<3"]
+video = ["opencv-python>=4.10,<4.14", "numpy>=1.26,<3"]
+headless = ["opencv-python-headless>=4.10,<4.14", "numpy>=1.26,<3"]
+model = ["onnxruntime>=1.20,<2", "numpy>=1.26,<3"]
+test = ["onnx>=1.17,<2"]
 
 [project.scripts]
 fall-detection = "fall_detection.cli:main"

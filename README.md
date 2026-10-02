@@ -2,7 +2,7 @@
 
 A Python project for detecting falls from video through pose estimation, motion tracking, and temporal analysis.
 
-**Development status: milestone 2 of 10 — webcam and local-video input.** This version streams synthetic frames, a local video, or a webcam through a tested pipeline, with optional desktop preview. Pose estimation, tracking, and fall classification are not implemented yet. Every prediction returns `unknown` with `detection_not_implemented`.
+**Development status: milestone 3 of 10 — ONNX pose adapter.** This version streams synthetic frames, a local video, or a webcam through a tested pipeline, and it can validate and run a user-supplied YOLO11-pose ONNX model on CPU. Tracking and fall classification are not implemented yet. Pipeline predictions remain `unknown` with `detection_not_implemented`.
 
 ## Install
 
@@ -29,16 +29,16 @@ source .venv/bin/activate
 Choose **one** installation:
 
 ```bash
-# Desktop, including a preview window
-python -m pip install -e ".[video]"
+# Desktop capture, preview, and pose inference
+python -m pip install -e ".[video,model]"
 ```
 
 ```bash
-# Server or CI, without GUI dependencies
-python -m pip install -e ".[headless]"
+# Server/CI capture and pose inference, without GUI dependencies
+python -m pip install -e ".[headless,model]"
 ```
 
-The OpenCV variants share the `cv2` namespace. Do not install both extras in the same environment; create a fresh virtual environment to switch. `python -m pip install -e .` still supports the synthetic demo without third-party runtime dependencies.
+The OpenCV variants share the `cv2` namespace. Do not install both in the same environment; create a fresh virtual environment to switch. The supported range currently excludes OpenCV 4.14 because its Linux wheel crashed during import in the milestone environment; 4.13 passed the full suite. `python -m pip install -e .` still supports the synthetic demo without third-party runtime dependencies. The `model` extra installs CPU ONNX Runtime and NumPy.
 
 ## Run
 
@@ -58,6 +58,10 @@ fall-detection capture --video data/sample.mp4 --preview --realtime
 
 # Decode as fast as possible without a window
 fall-detection capture --video data/sample.mp4 --headless --output outputs/video.jsonl
+
+# After supplying an authorized raw YOLO11-pose ONNX export
+fall-detection pose-check --config configs/pose.toml
+fall-detection pose-check --config configs/pose.toml --smoke
 ```
 
 `python -m fall_detection` is an alternative to the installed command. Camera index `0` usually selects the default webcam; another index may be needed. Video paths must name existing local files. Streaming URLs are not supported. Decoded frames retain their native dimensions. `configs/default.toml` configures the synthetic demo only.
@@ -73,6 +77,12 @@ Example video frame record:
 ```
 
 A final summary reports processed frames, source duration, elapsed time, and pipeline throughput. These are execution diagnostics, not fall-detection performance metrics.
+
+## Pose model contract
+
+`pose-check` validates a single-input/single-output float ONNX graph, forces `CPUExecutionProvider`, and optionally runs a black test frame through preprocessing, inference, and output decoding. The adapter performs aspect-preserving bilinear letterboxing, BGR-to-RGB conversion, float32 NCHW normalization, coordinate restoration, confidence filtering, and class-agnostic NMS. It accepts raw YOLO11-pose output with 17 COCO keypoints by default; thresholds, input dimensions, keypoint count, and model path are configurable in `configs/pose.toml` or through CLI overrides.
+
+The repository does not contain or download weights. Ultralytics offers YOLO11 models under AGPL-3.0 and Enterprise licenses; select an authorized model and suitable license before use. See [the exact model/output contract and licensing notes](docs/MODEL.md). The adapter is not connected to the streaming pipeline until tracking is added, so it does not yet produce fall states.
 
 ## Timing and capture limitations
 
@@ -92,7 +102,7 @@ Video timing switches permanently to FPS estimates when positions become unrelia
 python -m unittest discover -s tests -v
 ```
 
-The suite covers configuration, frame contracts, stream ordering, pacing, output protection, capture open/read failures, timestamp fallbacks, early stops, interruption, resource cleanup, and preview controls. With either OpenCV extra installed, it also generates an MJPG video in a temporary directory and decodes it through the CLI. Without OpenCV, that integration test is explicitly skipped. CI installs the headless extra and runs on Linux and Windows with Python 3.11 and 3.12.
+The suite covers configuration, frame contracts, stream ordering, pacing, output protection, capture failures, timestamp fallbacks, cleanup, preview controls, model metadata, tensor shapes, letterbox transforms, empty/invalid detections, coordinate restoration, and NMS. Test extras generate an MJPG video and a tiny constant-output ONNX contract fixture in temporary directories and exercise both through subprocess CLIs. The ONNX fixture contains no trained weights and is not a detector. CI runs on Linux and Windows with Python 3.11 and 3.12.
 
 Physical webcam/display validation is separate from automated tests. On a local desktop, run the preview and bounded-camera commands above; verify that frames appear, Q/Esc and window close stop cleanly, Ctrl+C releases the device, and the camera can reopen. Also check that disconnecting it reports an error. **These hardware checks have not been performed in this development environment.** See [the progress log](docs/PROGRESS.md), [roadmap](docs/ROADMAP.md), and [architecture](docs/ARCHITECTURE.md).
 

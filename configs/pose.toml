@@ -1,0 +1,8 @@
+# Supported contract: raw, single-batch Ultralytics YOLO11-pose ONNX export.
+[pose]
+model_path = "models/yolo11n-pose.onnx"
+input_width = 640
+input_height = 640
+keypoint_count = 17
+confidence_threshold = 0.25
+iou_threshold = 0.45

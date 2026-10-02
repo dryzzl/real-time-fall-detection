@@ -4,7 +4,7 @@ The completed pipeline is intended to follow this flow:
 
 `video source → pose estimator → person tracks → temporal features → state classifier → local alerts / overlay`
 
-Milestone 2 includes synthetic input, OpenCV webcam/local-video capture, the stream runner, the prediction interface, and optional desktop preview. Pose inference and downstream detection stages remain unimplemented.
+Milestone 3 includes synthetic input, OpenCV webcam/local-video capture, a CPU ONNX pose adapter, the stream runner, the prediction interface, and optional desktop preview. Tracking and downstream fall detection remain unimplemented.
 
 ## Current contracts
 
@@ -24,7 +24,6 @@ Camera timestamps use monotonic acquisition time. Video positions are relative t
 Preview is optional and loaded only when requested. It displays the pipeline's current prediction and reason, supports Q/Esc and window close, and never substitutes a normal state for unavailable inference. Headless mode makes no GUI calls. Camera-driver behavior and physical display support require local checks beyond mocked lifecycle tests.
 
 ## Planned choices
-- ONNX Runtime for pose inference on CPU, with explicitly configured model input/output contracts.
 - A simple, documented tracking baseline before any stronger tracking integration.
 - An explainable temporal baseline so the program has a testable detection path before a learned classifier is available.
 - Optional temporal-model training/export with subject/session-separated evaluation. Real model quality remains contingent on suitable, authorized data.
@@ -39,3 +38,9 @@ Preview is optional and loaded only when requested. It displays the pipeline's c
 - [ONNX Runtime Python API](https://onnxruntime.ai/docs/api/python/api_summary.html)
 
 The later integration milestones must verify the exact dependency versions and model formats they use.
+
+## Pose boundary
+
+`OnnxPoseEstimator` is deliberately separate from the fall-state `Predictor`. It turns one `FramePacket` into zero or more immutable pose detections; it does not classify safety or a fall. Milestone 4 will associate these detections across time before later feature and state stages consume them.
+
+The adapter lazily imports NumPy and ONNX Runtime, uses only `CPUExecutionProvider`, validates graph metadata, and supports the raw single-batch YOLO11-pose layout documented in [MODEL.md](MODEL.md). Preprocessing records a reversible letterbox transform. Decoding maps boxes and keypoints back to clipped source-frame coordinates, filters invalid/low-confidence rows, and applies class-agnostic NMS. Missing weights, dependencies, incompatible graph metadata, and execution errors fail explicitly; none become an empty normal scene.
