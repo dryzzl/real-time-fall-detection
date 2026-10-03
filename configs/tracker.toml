@@ -1,0 +1,10 @@
+[tracker]
+max_missed_frames = 2
+max_center_distance = 2.5
+max_pose_distance = 2.0
+min_iou = 0.05
+min_keypoint_confidence = 0.30
+velocity_smoothing = 0.25
+center_weight = 0.55
+iou_weight = 0.25
+pose_weight = 0.20

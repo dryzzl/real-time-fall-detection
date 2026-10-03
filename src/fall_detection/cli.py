@@ -13,6 +13,7 @@ from .pipeline import run_pipeline
 from .pose import OnnxPoseEstimator, PoseError, load_pose_config
 from .sources import synthetic_frames
 from .preview import Preview
+from .tracking import load_tracker_config, run_tracking_smoke
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -48,18 +49,24 @@ def main(argv: list[str] | None = None) -> int:
     pose.add_argument("--confidence-threshold", type=float)
     pose.add_argument("--iou-threshold", type=float)
     pose.add_argument("--smoke", action="store_true", help="Run one black frame through the model")
+    tracking = commands.add_parser("track-smoke", help="Run deterministic synthetic person-association checks")
+    tracking.add_argument("--config", type=Path, help="Tracker TOML configuration")
     args = parser.parse_args(argv)
     if args.command == "status":
         print(json.dumps({
-            "version": __version__, "milestone": "3/10",
+            "version": __version__, "milestone": "4/10",
             "implemented": ["configuration", "frame_contract", "synthetic_stream", "pipeline", "jsonl_output",
                             "webcam_input", "local_video_input", "optional_preview", "headless_capture",
-                            "onnx_pose_adapter", "letterbox_preprocessing", "pose_output_decoding"],
+                            "onnx_pose_adapter", "letterbox_preprocessing", "pose_output_decoding",
+                            "person_tracking", "stable_track_ids", "stale_track_expiry"],
             "fall_detection_available": False,
-            "next": "person_tracking",
+            "next": "temporal_pose_features",
         }))
         return 0
     try:
+        if args.command == "track-smoke":
+            print(json.dumps(run_tracking_smoke(load_tracker_config(args.config)), allow_nan=False))
+            return 0
         if args.command == "pose-check":
             pose_config = load_pose_config(
                 args.config, model_path=args.model, input_width=args.input_width,

@@ -4,13 +4,14 @@ The completed pipeline is intended to follow this flow:
 
 `video source → pose estimator → person tracks → temporal features → state classifier → local alerts / overlay`
 
-Milestone 3 includes synthetic input, OpenCV webcam/local-video capture, a CPU ONNX pose adapter, the stream runner, the prediction interface, and optional desktop preview. Tracking and downstream fall detection remain unimplemented.
+Milestone 4 includes synthetic input, OpenCV webcam/local-video capture, a CPU ONNX pose adapter, deterministic person tracking, the stream runner, the prediction interface, and optional desktop preview. Temporal features and downstream fall detection remain unimplemented.
 
 ## Current contracts
 
 - `FramePacket`: sequential index, source-relative seconds, dimensions, source identifier, explicit timestamp basis, and immutable interleaved BGR bytes. The buffer length must match the dimensions.
 - `Prediction`: an explicit `FallState`, optional confidence, and a machine-readable reason. `unknown` is distinct from `normal`; missing inference must never imply that a scene is safe.
-- `Predictor`: accepts a frame and returns a prediction. The foundation implementation always returns unavailable. A later orchestration layer will carry multiple tracked people and separate per-person histories.
+- `Predictor`: accepts a frame and returns a prediction. The foundation implementation always returns unavailable. Tracking remains separate because no tracked history can produce a fall state yet.
+- `TrackSnapshot`: a process-local track ID, frame index, age, hit/miss counts, predicted box, and an optional current pose detection. `detection=None` explicitly represents a missed observation.
 - `run_pipeline`: consumes one frame at a time, checks temporal order, optionally paces replay, and emits metadata records without image bytes. An optional per-frame callback receives the frame and prediction after pacing and emission; returning false stops without reading another frame.
 
 Source time and wall time are different. Features will use source timestamps; runtime diagnostics use a monotonic clock. Synthetic throughput is not representative of future model latency.
@@ -24,7 +25,6 @@ Camera timestamps use monotonic acquisition time. Video positions are relative t
 Preview is optional and loaded only when requested. It displays the pipeline's current prediction and reason, supports Q/Esc and window close, and never substitutes a normal state for unavailable inference. Headless mode makes no GUI calls. Camera-driver behavior and physical display support require local checks beyond mocked lifecycle tests.
 
 ## Planned choices
-- A simple, documented tracking baseline before any stronger tracking integration.
 - An explainable temporal baseline so the program has a testable detection path before a learned classifier is available.
 - Optional temporal-model training/export with subject/session-separated evaluation. Real model quality remains contingent on suitable, authorized data.
 - Local JSONL events and overlays. No footage uploads or external notification service by default.
@@ -41,6 +41,12 @@ The later integration milestones must verify the exact dependency versions and m
 
 ## Pose boundary
 
-`OnnxPoseEstimator` is deliberately separate from the fall-state `Predictor`. It turns one `FramePacket` into zero or more immutable pose detections; it does not classify safety or a fall. Milestone 4 will associate these detections across time before later feature and state stages consume them.
+`OnnxPoseEstimator` is deliberately separate from the fall-state `Predictor`. It turns one `FramePacket` into zero or more immutable pose detections; it does not classify safety or a fall. `PoseTrackingStage` now composes that boundary with `PersonTracker` before later feature and state stages consume per-person histories.
 
 The adapter lazily imports NumPy and ONNX Runtime, uses only `CPUExecutionProvider`, validates graph metadata, and supports the raw single-batch YOLO11-pose layout documented in [MODEL.md](MODEL.md). Preprocessing records a reversible letterbox transform. Decoding maps boxes and keypoints back to clipped source-frame coordinates, filters invalid/low-confidence rows, and applies class-agnostic NMS. Missing weights, dependencies, incompatible graph metadata, and execution errors fail explicitly; none become an empty normal scene.
+
+## Tracking lifecycle
+
+`PersonTracker` canonicalizes detection order, predicts active boxes/keypoints with smoothed constant velocity, scores gated pairs using center distance, IoU, and confident-keypoint distance, and applies deterministic greedy assignment. New detections receive monotonically increasing IDs. Unmatched tracks remain active as explicit missing snapshots through `max_missed_frames`, then expire. Skipped frame indices count toward expiry.
+
+The tracker is bounded by the number of recently active people and retains only the last detection and velocity per track; temporal pose windows arrive in milestone 5. IDs reset with the process and are association handles, not real-world identities. See [TRACKING.md](TRACKING.md) for configuration, deterministic behavior, and limitations including the absence of appearance re-identification or global assignment.

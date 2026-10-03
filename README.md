@@ -2,7 +2,7 @@
 
 A Python project for detecting falls from video through pose estimation, motion tracking, and temporal analysis.
 
-**Development status: milestone 3 of 10 — ONNX pose adapter.** This version streams synthetic frames, a local video, or a webcam through a tested pipeline, and it can validate and run a user-supplied YOLO11-pose ONNX model on CPU. Tracking and fall classification are not implemented yet. Pipeline predictions remain `unknown` with `detection_not_implemented`.
+**Development status: milestone 4 of 10 — deterministic person tracking.** This version streams synthetic frames, a local video, or a webcam; can validate and run a user-supplied YOLO11-pose ONNX model on CPU; and assigns process-local track IDs to pose detections. Temporal features and fall classification are not implemented yet. Pipeline predictions remain `unknown` with `detection_not_implemented`.
 
 ## Install
 
@@ -62,6 +62,9 @@ fall-detection capture --video data/sample.mp4 --headless --output outputs/video
 # After supplying an authorized raw YOLO11-pose ONNX export
 fall-detection pose-check --config configs/pose.toml
 fall-detection pose-check --config configs/pose.toml --smoke
+
+# Dependency-free tracking regression check
+fall-detection track-smoke --config configs/tracker.toml
 ```
 
 `python -m fall_detection` is an alternative to the installed command. Camera index `0` usually selects the default webcam; another index may be needed. Video paths must name existing local files. Streaming URLs are not supported. Decoded frames retain their native dimensions. `configs/default.toml` configures the synthetic demo only.
@@ -82,7 +85,13 @@ A final summary reports processed frames, source duration, elapsed time, and pip
 
 `pose-check` validates a single-input/single-output float ONNX graph, forces `CPUExecutionProvider`, and optionally runs a black test frame through preprocessing, inference, and output decoding. The adapter performs aspect-preserving bilinear letterboxing, BGR-to-RGB conversion, float32 NCHW normalization, coordinate restoration, confidence filtering, and class-agnostic NMS. It accepts raw YOLO11-pose output with 17 COCO keypoints by default; thresholds, input dimensions, keypoint count, and model path are configurable in `configs/pose.toml` or through CLI overrides.
 
-The repository does not contain or download weights. Ultralytics offers YOLO11 models under AGPL-3.0 and Enterprise licenses; select an authorized model and suitable license before use. See [the exact model/output contract and licensing notes](docs/MODEL.md). The adapter is not connected to the streaming pipeline until tracking is added, so it does not yet produce fall states.
+The repository does not contain or download weights. Ultralytics offers YOLO11 models under AGPL-3.0 and Enterprise licenses; select an authorized model and suitable license before use. See [the exact model/output contract and licensing notes](docs/MODEL.md). `PoseTrackingStage` composes an estimator with the tracker, but it does not produce fall states.
+
+## Person tracking
+
+The tracking baseline combines smoothed constant-velocity prediction, normalized center distance, predicted-box overlap, and confident-keypoint distance. IDs are assigned deterministically, survive a configurable number of missed frames, and expire rather than silently reviving stale people. Missed tracks emit `detection=None` so later stages can distinguish an absent observation from an unchanged pose. Parameters are validated from `configs/tracker.toml`.
+
+`track-smoke` runs two synthetic people through a clean crossing, reverses detector order between frames, and recovers one deliberately missed observation. This validates deterministic code behavior only. The baseline is not BoT-SORT and has no appearance model, camera-motion compensation, global assignment, or cross-session identity. Identity switches remain possible in crowded scenes, abrupt motion, or long occlusion. See [the tracking contract and limitations](docs/TRACKING.md).
 
 ## Timing and capture limitations
 
@@ -102,7 +111,7 @@ Video timing switches permanently to FPS estimates when positions become unrelia
 python -m unittest discover -s tests -v
 ```
 
-The suite covers configuration, frame contracts, stream ordering, pacing, output protection, capture failures, timestamp fallbacks, cleanup, preview controls, model metadata, tensor shapes, letterbox transforms, empty/invalid detections, coordinate restoration, and NMS. Test extras generate an MJPG video and a tiny constant-output ONNX contract fixture in temporary directories and exercise both through subprocess CLIs. The ONNX fixture contains no trained weights and is not a detector. CI runs on Linux and Windows with Python 3.11 and 3.12.
+The suite covers configuration, frame contracts, stream ordering, capture cleanup, model metadata, letterbox transforms, output decoding, person crossings, detector-order changes, missed observations, expiry boundaries, and invalid tracker inputs. Test extras generate an MJPG video and a tiny constant-output ONNX contract fixture in temporary directories and exercise both through subprocess CLIs. Synthetic tracking and the ONNX fixture contain no real people or trained weights and are not quality measurements. CI runs on Linux and Windows with Python 3.11 and 3.12.
 
 Physical webcam/display validation is separate from automated tests. On a local desktop, run the preview and bounded-camera commands above; verify that frames appear, Q/Esc and window close stop cleanly, Ctrl+C releases the device, and the camera can reopen. Also check that disconnecting it reports an error. **These hardware checks have not been performed in this development environment.** See [the progress log](docs/PROGRESS.md), [roadmap](docs/ROADMAP.md), and [architecture](docs/ARCHITECTURE.md).
 

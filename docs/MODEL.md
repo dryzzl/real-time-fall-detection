@@ -28,7 +28,7 @@ fall-detection pose-check --config configs/pose.toml
 fall-detection pose-check --config configs/pose.toml --smoke
 ```
 
-`--smoke` runs one black test frame through the graph and reports its pose count. It confirms that preprocessing, ONNX execution, and decoding complete; it is not an accuracy, safety, or real-world detection test. The pose adapter is not yet connected to tracking or fall classification, so `fall_detection_available` remains false.
+`--smoke` runs one black test frame through the graph and reports its pose count. It confirms that preprocessing, ONNX execution, and decoding complete; it is not an accuracy, safety, or real-world detection test. `PoseTrackingStage` can now pass adapter results to the tracking baseline, but fall classification remains unimplemented, so `fall_detection_available` remains false.
 
 ## Export and licensing
 

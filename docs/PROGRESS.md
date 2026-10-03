@@ -104,3 +104,39 @@ Limitations and blockers:
 Next milestone: deterministic person association with stable IDs and stale-track expiry, including crossing, missed-frame, and expiry tests plus documented baseline limitations.
 
 Remote CI for this commit is checked after publication; the result is reported with the commit link.
+
+## Milestone 4 — deterministic person tracking
+
+Date: 2026-10-02
+
+Status: complete against the milestone's deterministic baseline acceptance gates (4 of 10 planned milestones). This is a transparent local association baseline, not a claim of production tracking quality.
+
+Implemented:
+
+- `tracking.py`: validated tracker configuration, canonical detection ordering, process-local stable IDs, constant-velocity box/keypoint prediction, gated association costs, deterministic greedy matching, and reset support.
+- Association combines resolution-normalized center distance, predicted-box IoU, and mean confident-keypoint distance. Velocity updates use frame-index gaps and configurable smoothing.
+- Explicit `TrackSnapshot` values carry age, hit count, missed-frame count, predicted box, and an optional current detection. A missed observation is `detection=None`; stale keypoints are never presented as current.
+- Tracks remain eligible across at most `max_missed_frames` intervening frames, then expire. Reappearance after expiry receives a new monotonically increasing ID. Skipped frame indices count toward the same boundary.
+- `PoseTrackingStage` composes any pose estimator with the tracker without inventing a fall state.
+- `configs/tracker.toml`, dependency-free `track-smoke` CLI, version `0.1.0.dev4`, updated capability status, architecture notes, and dedicated tracking contract/limitation documentation.
+- Fifteen tracking tests cover reversed detection order, two-person crossing, exact overlap with pose disambiguation, missed observations, recovery, skipped indices, expiry, far detections, low-confidence keypoint fallback, reset, invalid inputs, stage composition, and CLI smoke output.
+
+Validation performed on Linux with Python 3.12.14:
+
+- `.venv/bin/python -m pip install --no-build-isolation -e '.[headless,model,test]'`: passed; installed version `0.1.0.dev4` with the existing milestone dependencies.
+- `.venv/bin/python -m pip check`: passed with no broken requirements.
+- `.venv/bin/python -m unittest discover -s tests -v`: **69 tests passed, none skipped**.
+- `PYTHONPATH=src python -m unittest tests.test_tracking -v`: 15 tracking tests passed using the dependency-free code path.
+- `.venv/bin/fall-detection track-smoke --config configs/tracker.toml`: passed across six synthetic frames. IDs 1 and 2 crossed from opposite sides without swapping; ID 2 emitted `null` for one missed frame and recovered. The output retained `fall_detection_available: false`.
+- `.venv/bin/fall-detection status`: reported milestone 4/10, version `0.1.0.dev4`, fall detection unavailable, and temporal pose features next.
+
+Limitations and blockers:
+
+- Matching is deterministic greedy assignment, not BoT-SORT or another evaluated production tracker. It has no appearance embedding, camera-motion compensation, Kalman uncertainty, global assignment, or cross-session re-identification. Stable behavior in the synthetic crossing does not guarantee correct identity in real footage.
+- IDs are ephemeral association handles, not biometric identities. Sudden motion, long occlusion, crowded overlap, detector jitter, or similar people can still cause identity switches or new tracks.
+- No authorized pose weights or real recordings were used. Tracking quality, latency on a real model, and real-world fall performance remain unmeasured. Physical webcam/display checks also remain pending.
+- No blocker prevents the next code milestone. Authorized weights and footage will be required later for real-world validation.
+
+Next milestone: bounded per-person pose/motion feature windows with normalization, low-confidence and missing-observation handling, and independent-history tests.
+
+Remote CI for this commit is checked after publication; the result is reported with the commit link.
