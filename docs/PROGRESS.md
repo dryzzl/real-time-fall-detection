@@ -140,3 +140,39 @@ Limitations and blockers:
 Next milestone: bounded per-person pose/motion feature windows with normalization, low-confidence and missing-observation handling, and independent-history tests.
 
 Remote CI for this commit is checked after publication; the result is reported with the commit link.
+
+## Milestone 5 — bounded pose and motion features
+
+Date: 2026-10-03
+
+Status: complete against the milestone's deterministic feature-contract acceptance gates (5 of 10 planned milestones). No state classifier or detection-quality claim is included.
+
+Implemented:
+
+- `features.py`: strict feature configuration; frame-normalized box center/size; box aspect ratio; source-time normalized center velocity; box-relative keypoint coordinates; and explicit confidence masks.
+- Low-confidence joints become `(None, None)` and false mask entries. Missed track observations become fully missing samples rather than stale or zero-filled poses. Motion is unavailable for a new track, after missing data, or across an excessive source-time gap.
+- `TemporalFeatureBank`: independent fixed-size deques per active track, strictly ordered frame/timestamp validation, deterministic track ordering, configurable readiness, reset support, and immediate history cleanup when a tracker ID expires.
+- `PoseTrackingFeatureStage` composes tracking with temporal features without assigning a fall state.
+- `configs/features.toml`, dependency-free `feature-smoke` CLI, version `0.1.0.dev5`, updated status/architecture/README, and a dedicated feature contract document.
+- Nineteen feature tests cover configuration, translation/scale normalization, frame geometry, confidence boundaries, missing observations, recovery, source-time velocity, long gaps, independent histories, fixed window bounds, readiness, retirement, transactional validation, JSON serialization, reset, invalid contracts, stage composition, and smoke output.
+
+Validation performed on Linux with Python 3.12.14:
+
+- `.venv/bin/python -m pip install --no-build-isolation -e '.[headless,model,test]'`: passed after installing the declared `setuptools>=68` build requirement into the new virtual environment; installed version `0.1.0.dev5`.
+- `.venv/bin/python -m pip check`: passed with no broken requirements.
+- `.venv/bin/python -m unittest discover -s tests -v`: **88 tests passed, none skipped**.
+- `PYTHONPATH=src python -m unittest tests.test_features -v`: **19 feature tests passed** through the dependency-free code path.
+- `.venv/bin/fall-detection feature-smoke --config configs/features.toml`: passed across six synthetic frames. Both tracks retained independent six-sample histories, one low-confidence joint was masked, and track 2 recorded one false observation before recovery. Output retained `fall_detection_available: false`.
+- `.venv/bin/fall-detection status`: reported milestone 5/10, version `0.1.0.dev5`, fall detection unavailable, and the explainable temporal state baseline next.
+- `.venv/bin/python -m compileall -q src tests`: passed.
+
+Limitations and blockers:
+
+- Normalization and window behavior are contract tests, not measured feature usefulness. No authorized weights or real recordings were used; real pose noise, occlusion behavior, tracking identity switches, and feature distributions remain unmeasured.
+- The feature bank expects the complete active tracker snapshot set on every processed frame. Keypoint layout and count must match the configured pose model. Histories are process-local and intentionally disappear when a track expires.
+- `ready` means enough usable observations are present; it is not a `normal`, `falling`, or `fallen` prediction. Fall detection remains unavailable and pipeline output stays `unknown`.
+- No blocker prevents the next code milestone. Authorized weights and representative footage will be required for later real-world validation.
+
+Next milestone: an explainable, configurable temporal baseline that distinguishes standing, lying, descent, and missing observations as `normal`, `falling`, `fallen`, or `unknown` in deterministic sequence tests.
+
+Remote CI for this commit is checked after publication; the result is reported with the commit link.

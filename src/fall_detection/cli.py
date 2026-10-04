@@ -9,6 +9,7 @@ import sys
 from . import __version__
 from .capture import CaptureConfig, CaptureError, open_capture
 from .config import load_config
+from .features import load_feature_config, run_feature_smoke
 from .pipeline import run_pipeline
 from .pose import OnnxPoseEstimator, PoseError, load_pose_config
 from .sources import synthetic_frames
@@ -51,19 +52,25 @@ def main(argv: list[str] | None = None) -> int:
     pose.add_argument("--smoke", action="store_true", help="Run one black frame through the model")
     tracking = commands.add_parser("track-smoke", help="Run deterministic synthetic person-association checks")
     tracking.add_argument("--config", type=Path, help="Tracker TOML configuration")
+    features = commands.add_parser("feature-smoke", help="Run deterministic temporal-feature checks")
+    features.add_argument("--config", type=Path, help="Feature TOML configuration")
     args = parser.parse_args(argv)
     if args.command == "status":
         print(json.dumps({
-            "version": __version__, "milestone": "4/10",
+            "version": __version__, "milestone": "5/10",
             "implemented": ["configuration", "frame_contract", "synthetic_stream", "pipeline", "jsonl_output",
                             "webcam_input", "local_video_input", "optional_preview", "headless_capture",
                             "onnx_pose_adapter", "letterbox_preprocessing", "pose_output_decoding",
-                            "person_tracking", "stable_track_ids", "stale_track_expiry"],
+                            "person_tracking", "stable_track_ids", "stale_track_expiry",
+                            "normalized_pose_features", "motion_features", "temporal_feature_windows"],
             "fall_detection_available": False,
-            "next": "temporal_pose_features",
+            "next": "explainable_temporal_state_baseline",
         }))
         return 0
     try:
+        if args.command == "feature-smoke":
+            print(json.dumps(run_feature_smoke(load_feature_config(args.config)), allow_nan=False))
+            return 0
         if args.command == "track-smoke":
             print(json.dumps(run_tracking_smoke(load_tracker_config(args.config)), allow_nan=False))
             return 0

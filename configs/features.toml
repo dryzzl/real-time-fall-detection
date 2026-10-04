@@ -1,0 +1,6 @@
+[features]
+window_size = 30
+keypoint_count = 17
+min_keypoint_confidence = 0.30
+min_observed_samples = 8
+max_motion_gap_seconds = 1.0
