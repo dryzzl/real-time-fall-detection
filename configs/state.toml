@@ -1,0 +1,12 @@
+[state]
+min_contiguous_observations = 3
+min_keypoint_fraction = 0.50
+upright_max_aspect_ratio = 0.80
+lying_min_aspect_ratio = 1.20
+normal_max_vertical_speed = 0.12
+falling_min_vertical_speed = 0.20
+falling_min_center_drop = 0.10
+falling_min_aspect_increase = 0.25
+transition_window_seconds = 1.50
+fallen_min_duration_seconds = 0.50
+settled_max_vertical_speed = 0.08

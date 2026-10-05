@@ -2,7 +2,7 @@
 
 A Python project for detecting falls from video through pose estimation, motion tracking, and temporal analysis.
 
-**Development status: milestone 5 of 10 — bounded pose and motion features.** This version streams synthetic frames, a local video, or a webcam; can validate and run a user-supplied YOLO11-pose ONNX model on CPU; assigns process-local track IDs; and maintains normalized temporal feature windows per active person. Fall classification is not implemented yet. Pipeline predictions remain `unknown` with `detection_not_implemented`.
+**Development status: milestone 6 of 10 — explainable temporal state baseline.** This version streams synthetic frames, a local video, or a webcam; can validate and run a user-supplied YOLO11-pose ONNX model on CPU; assigns process-local track IDs; maintains normalized temporal feature windows; and can classify validated per-person windows as `normal`, `falling`, `fallen`, or `unknown` with explicit evidence. The default streaming commands are not yet connected to the model and baseline, so their predictions remain `unknown` with `detection_not_implemented`.
 
 ## Install
 
@@ -68,6 +68,9 @@ fall-detection track-smoke --config configs/tracker.toml
 
 # Dependency-free temporal-feature regression check
 fall-detection feature-smoke --config configs/features.toml
+
+# Dependency-free temporal-state sequence check
+fall-detection state-smoke --config configs/state.toml
 ```
 
 `python -m fall_detection` is an alternative to the installed command. Camera index `0` usually selects the default webcam; another index may be needed. Video paths must name existing local files. Streaming URLs are not supported. Decoded frames retain their native dimensions. `configs/default.toml` configures the synthetic demo only.
@@ -102,6 +105,12 @@ Each active track has an independent fixed-size history. Observed samples contai
 
 Window length, expected keypoint count, confidence threshold, readiness minimum, and maximum motion interval are validated from `configs/features.toml`. `feature-smoke` exercises two tracks, a masked joint, a missed observation, recovery, and bounded JSON output. No feature window is a fall state, and this milestone does not make fall detection available. See [the temporal feature contract](docs/FEATURES.md).
 
+## Explainable state baseline
+
+`TemporalStateClassifier` applies configurable rules to each ready feature window. A rapid downward center shift plus a widening posture is `falling`; a wide posture that remains still for the settled duration is `fallen`; a stable upright posture is `normal`. Missing, low-confidence, short, interrupted, or ambiguous evidence is always `unknown`. Each decision includes the observed measurements and a reason string.
+
+The baseline returns `confidence: null` because its thresholds have not been calibrated as probabilities. `state-smoke` checks standing, lying, descent, and missing sequences without video or model weights. The baseline is available as a library stage, but end-to-end fall detection remains unavailable in `demo` and `capture` until later integration and real-input evaluation. See [the state rules, configuration, and limitations](docs/STATE_BASELINE.md).
+
 ## Timing and capture limitations
 
 | Timestamp basis | Meaning |
@@ -120,10 +129,10 @@ Video timing switches permanently to FPS estimates when positions become unrelia
 python -m unittest discover -s tests -v
 ```
 
-The suite covers configuration, frame contracts, stream ordering, capture cleanup, model metadata, letterbox transforms, output decoding, person crossings, detector-order changes, missed observations, expiry boundaries, normalized pose/motion features, low-confidence masking, independent bounded histories, and invalid inputs. Test extras generate an MJPG video and a tiny constant-output ONNX contract fixture in temporary directories and exercise both through subprocess CLIs. Synthetic tracking/features and the ONNX fixture contain no real people or trained weights and are not quality measurements. CI runs on Linux and Windows with Python 3.11 and 3.12.
+The suite covers configuration, frame contracts, stream ordering, capture cleanup, model metadata, letterbox transforms, output decoding, person crossings, detector-order changes, missed observations, expiry boundaries, normalized pose/motion features, low-confidence masking, independent bounded histories, state-sequence decisions, threshold boundaries, and invalid inputs. Test extras generate an MJPG video and a tiny constant-output ONNX contract fixture in temporary directories and exercise both through subprocess CLIs. Synthetic tracking/features/state sequences and the ONNX fixture contain no real people or trained weights and are not quality measurements. CI runs on Linux and Windows with Python 3.11 and 3.12.
 
 Physical webcam/display validation is separate from automated tests. On a local desktop, run the preview and bounded-camera commands above; verify that frames appear, Q/Esc and window close stop cleanly, Ctrl+C releases the device, and the camera can reopen. Also check that disconnecting it reports an error. **These hardware checks have not been performed in this development environment.** See [the progress log](docs/PROGRESS.md), [roadmap](docs/ROADMAP.md), and [architecture](docs/ARCHITECTURE.md).
 
 ## Scope
 
-This is a development prototype, not a medical or emergency-response device. There are no accuracy, recall, or clinical-validation claims for this repository. The synthetic sources and generated test video do not depict a person or a fall. Temporal features alone are not a classifier. Later model evaluation must use authorized data and document the dataset, split, measurements, and limitations. A trained temporal model will require suitable labeled sequences; missing data or weights will be reported as blockers rather than replaced by invented results.
+This is a development prototype, not a medical or emergency-response device. There are no accuracy, recall, or clinical-validation claims for this repository. The synthetic sources and generated test video do not depict a person or a fall. The explainable state baseline proves code behavior, not real-world quality. Later model evaluation must use authorized data and document the dataset, split, measurements, and limitations. A trained temporal model will require suitable labeled sequences; missing data or weights will be reported as blockers rather than replaced by invented results.

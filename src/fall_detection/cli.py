@@ -14,6 +14,7 @@ from .pipeline import run_pipeline
 from .pose import OnnxPoseEstimator, PoseError, load_pose_config
 from .sources import synthetic_frames
 from .preview import Preview
+from .state import load_state_config, run_state_smoke
 from .tracking import load_tracker_config, run_tracking_smoke
 
 
@@ -54,20 +55,27 @@ def main(argv: list[str] | None = None) -> int:
     tracking.add_argument("--config", type=Path, help="Tracker TOML configuration")
     features = commands.add_parser("feature-smoke", help="Run deterministic temporal-feature checks")
     features.add_argument("--config", type=Path, help="Feature TOML configuration")
+    state = commands.add_parser("state-smoke", help="Run explainable temporal-state sequence checks")
+    state.add_argument("--config", type=Path, help="State baseline TOML configuration")
     args = parser.parse_args(argv)
     if args.command == "status":
         print(json.dumps({
-            "version": __version__, "milestone": "5/10",
+            "version": __version__, "milestone": "6/10",
             "implemented": ["configuration", "frame_contract", "synthetic_stream", "pipeline", "jsonl_output",
                             "webcam_input", "local_video_input", "optional_preview", "headless_capture",
                             "onnx_pose_adapter", "letterbox_preprocessing", "pose_output_decoding",
                             "person_tracking", "stable_track_ids", "stale_track_expiry",
-                            "normalized_pose_features", "motion_features", "temporal_feature_windows"],
+                            "normalized_pose_features", "motion_features", "temporal_feature_windows",
+                            "explainable_state_baseline", "per_person_state_decisions"],
+            "baseline_state_classifier_available": True,
             "fall_detection_available": False,
-            "next": "explainable_temporal_state_baseline",
+            "next": "training_and_export_preparation",
         }))
         return 0
     try:
+        if args.command == "state-smoke":
+            print(json.dumps(run_state_smoke(load_state_config(args.config)), allow_nan=False))
+            return 0
         if args.command == "feature-smoke":
             print(json.dumps(run_feature_smoke(load_feature_config(args.config)), allow_nan=False))
             return 0

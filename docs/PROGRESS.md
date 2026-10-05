@@ -176,3 +176,39 @@ Limitations and blockers:
 Next milestone: an explainable, configurable temporal baseline that distinguishes standing, lying, descent, and missing observations as `normal`, `falling`, `fallen`, or `unknown` in deterministic sequence tests.
 
 Remote CI for this commit is checked after publication; the result is reported with the commit link.
+
+## Milestone 6 — explainable temporal state baseline
+
+Date: 2026-10-04
+
+Status: complete against the milestone's deterministic sequence acceptance gates (6 of 10 planned milestones). The classifier is available for validated feature windows; default video/camera pipeline output remains unavailable until later integration.
+
+Implemented:
+
+- `state.py`: strict threshold configuration, per-track `StateDecision` and `StateEvidence` contracts, full feature-window validation, deterministic ordering, and `TemporalStateStage` composition.
+- Conservative decision order: missing/unready/low-confidence/interrupted evidence stays `unknown`; settled lying posture becomes `fallen`; rapid descent with concurrent posture widening becomes `falling`; stable upright posture becomes `normal`; all other poses remain `unknown`.
+- Configurable thresholds for contiguous observations, confident-joint fraction, upright/lying aspect ratios, stable/transition speed, center drop, aspect-ratio change, transition interval, and settled duration.
+- Evidence records explain each branch using current posture/motion, transition displacement/change, or settled duration. Confidence remains `None` because the deterministic thresholds are not calibrated probabilities.
+- `configs/state.toml`, dependency-free `state-smoke` CLI, version `0.1.0.dev6`, updated capability status/architecture/README, and a dedicated state baseline document.
+- Twenty state tests cover configuration, standing, settled lying, descent, missing observations, readiness, pose-confidence gates, interrupted histories, ambiguous poses, necessary multi-signal fall evidence, configurable thresholds, state precedence, deterministic multi-person ordering, malformed contracts, stage composition, finite JSON, and CLI smoke output.
+
+Validation performed on Linux with Python 3.12.14:
+
+- `.venv/bin/python -m pip install --no-build-isolation -e '.[headless,model,test]'`: passed after installing the declared `setuptools>=68` build requirement into the new virtual environment; installed version `0.1.0.dev6`.
+- `.venv/bin/python -m pip check`: passed with no broken requirements.
+- `.venv/bin/python -m unittest discover -s tests -v`: **108 tests passed, none skipped**.
+- `PYTHONPATH=src python -m unittest tests.test_state -v`: **20 state tests passed** through the dependency-free code path.
+- `.venv/bin/fall-detection state-smoke --config configs/state.toml`: passed. Final synthetic states were standing `normal`, lying `fallen`, descent `falling`, and missing `unknown`; all confidences remained null and `fall_detection_available` remained false.
+- `.venv/bin/fall-detection status`: reported milestone 6/10, version `0.1.0.dev6`, the baseline classifier available, end-to-end fall detection unavailable, and training/export preparation next.
+- `.venv/bin/python -m compileall -q src tests`: passed.
+
+Limitations and blockers:
+
+- The rules rely on detector box geometry, tracked center motion, and confidence masks. Camera motion, viewpoint, cropping, furniture, crouching, detector jitter, and identity switches can produce misleading evidence.
+- Synthetic sequence tests validate branch behavior only. No authorized real footage or production pose weights were used, thresholds were not tuned, and no accuracy, recall, precision, latency, or clinical claim is available.
+- The default `demo` and `capture` commands still use `UnavailablePredictor`; a library-level decision over handcrafted feature windows is not presented as end-to-end real-time detection.
+- No blocker prevents the next scaffold milestone. User-authorized labeled sequences will be required to train or evaluate a temporal model; without them, the dataset-dependent model artifact must remain blocked.
+
+Next milestone: define the dataset and split contracts, build local temporal-model training/export interfaces, test data handling, and record the learned model artifact as blocked unless authorized labeled data is supplied.
+
+Remote CI for this commit is checked after publication; the result is reported with the commit link.

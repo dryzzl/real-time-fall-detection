@@ -4,7 +4,7 @@ The completed pipeline is intended to follow this flow:
 
 `video source → pose estimator → person tracks → temporal features → state classifier → local alerts / overlay`
 
-Milestone 5 includes synthetic input, OpenCV webcam/local-video capture, a CPU ONNX pose adapter, deterministic person tracking, normalized temporal feature windows, the stream runner, the prediction interface, and optional desktop preview. State classification and downstream alerting remain unimplemented.
+Milestone 6 includes synthetic input, OpenCV webcam/local-video capture, a CPU ONNX pose adapter, deterministic person tracking, normalized temporal feature windows, an explainable state baseline, the stream runner, the prediction interface, and optional desktop preview. Training/export preparation, persistent alerting, evaluation, and end-to-end runtime integration remain later milestones.
 
 ## Current contracts
 
@@ -14,6 +14,7 @@ Milestone 5 includes synthetic input, OpenCV webcam/local-video capture, a CPU O
 - `TrackSnapshot`: a process-local track ID, frame index, age, hit/miss counts, predicted box, and an optional current pose detection. `detection=None` explicitly represents a missed observation.
 - `PoseFeatureSample`: timestamped box/motion values, box-relative keypoints, confidence mask, and explicit observation availability for one tracked person.
 - `TemporalFeatureWindow`: one bounded, independently owned sample sequence with an observed count and readiness flag. Readiness is data availability, not a fall or safety state.
+- `StateDecision`: a per-track `FallState`, machine-readable reason, explicit evidence, and no fabricated probability. `unknown` covers missing, insufficient, low-confidence, and ambiguous evidence.
 - `run_pipeline`: consumes one frame at a time, checks temporal order, optionally paces replay, and emits metadata records without image bytes. An optional per-frame callback receives the frame and prediction after pacing and emission; returning false stops without reading another frame.
 
 Source time and wall time are different. Features use source timestamps; runtime diagnostics use a monotonic clock. Synthetic throughput is not representative of future model latency.
@@ -27,7 +28,6 @@ Camera timestamps use monotonic acquisition time. Video positions are relative t
 Preview is optional and loaded only when requested. It displays the pipeline's current prediction and reason, supports Q/Esc and window close, and never substitutes a normal state for unavailable inference. Headless mode makes no GUI calls. Camera-driver behavior and physical display support require local checks beyond mocked lifecycle tests.
 
 ## Planned choices
-- An explainable temporal baseline so the program has a testable detection path before a learned classifier is available.
 - Optional temporal-model training/export with subject/session-separated evaluation. Real model quality remains contingent on suitable, authorized data.
 - Local JSONL events and overlays. No footage uploads or external notification service by default.
 
@@ -58,3 +58,9 @@ The tracker is bounded by the number of recently active people and retains only 
 `TemporalFeatureBank` consumes the complete active `TrackSnapshot` set with its corresponding `FramePacket`. It normalizes box geometry to frame dimensions, pose geometry to each detection box, and center motion to source time. Confidence masks distinguish missing joints from valid zero-valued coordinates. Missing track observations produce missing samples rather than repeated poses; motion is not bridged across missing samples or excessive time gaps.
 
 Each active track owns a fixed-size deque. Histories are independent, include missing slots, and are deleted after the tracker retires an ID, so storage is bounded by active people times configured window size. `PoseTrackingFeatureStage` composes pose tracking and feature extraction without exposing a fall state. See [FEATURES.md](FEATURES.md) for the exact fields, validation rules, readiness semantics, and synthetic smoke check.
+
+## Explainable state lifecycle
+
+`TemporalStateClassifier` consumes one complete feature window and returns a `StateDecision`. It first rejects missing, unready, low-confidence, or non-contiguous evidence as `unknown`. Settled lying posture maps to `fallen`; a recent upright-to-wider transition with sufficient downward displacement and speed maps to `falling`; stable upright posture maps to `normal`; every other case remains `unknown`.
+
+`TemporalStateStage` composes an arbitrary feature stage with deterministic, track-ordered classification. Decisions expose the relevant thresholds and measurements but keep confidence null because the rules have not been statistically calibrated. The existing `run_pipeline` default still uses `UnavailablePredictor`; this boundary prevents a library-level synthetic baseline from being presented as working end-to-end video detection. See [STATE_BASELINE.md](STATE_BASELINE.md).
