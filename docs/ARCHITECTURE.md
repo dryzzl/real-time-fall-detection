@@ -4,7 +4,7 @@ The completed pipeline is intended to follow this flow:
 
 `video source → pose estimator → person tracks → temporal features → state classifier → local alerts / overlay`
 
-Milestone 6 includes synthetic input, OpenCV webcam/local-video capture, a CPU ONNX pose adapter, deterministic person tracking, normalized temporal feature windows, an explainable state baseline, the stream runner, the prediction interface, and optional desktop preview. Training/export preparation, persistent alerting, evaluation, and end-to-end runtime integration remain later milestones.
+Milestone 7 includes synthetic input, OpenCV webcam/local-video capture, a CPU ONNX pose adapter, deterministic person tracking, normalized temporal feature windows, an explainable state baseline, temporal dataset/split contracts, and a verified future ONNX export boundary. Persistent alerting, evaluation, and end-to-end runtime integration remain later milestones. No trained temporal artifact is present.
 
 ## Current contracts
 
@@ -15,6 +15,8 @@ Milestone 6 includes synthetic input, OpenCV webcam/local-video capture, a CPU O
 - `PoseFeatureSample`: timestamped box/motion values, box-relative keypoints, confidence mask, and explicit observation availability for one tracked person.
 - `TemporalFeatureWindow`: one bounded, independently owned sample sequence with an observed count and readiness flag. Readiness is data availability, not a fall or safety state.
 - `StateDecision`: a per-track `FallState`, machine-readable reason, explicit evidence, and no fabricated probability. `unknown` covers missing, insufficient, low-confidence, and ambiguous evidence.
+- `TemporalSequence` / `SplitManifest`: fixed-shape labeled features with pseudonymous subject/session groups, authorization references, a dataset fingerprint, and deterministic subject-separated assignments.
+- `TemporalModelContract`: a CPU-verified ONNX input/output and metadata boundary for future injected training backends; compatibility is not model quality.
 - `run_pipeline`: consumes one frame at a time, checks temporal order, optionally paces replay, and emits metadata records without image bytes. An optional per-frame callback receives the frame and prediction after pacing and emission; returning false stops without reading another frame.
 
 Source time and wall time are different. Features use source timestamps; runtime diagnostics use a monotonic clock. Synthetic throughput is not representative of future model latency.
@@ -28,7 +30,6 @@ Camera timestamps use monotonic acquisition time. Video positions are relative t
 Preview is optional and loaded only when requested. It displays the pipeline's current prediction and reason, supports Q/Esc and window close, and never substitutes a normal state for unavailable inference. Headless mode makes no GUI calls. Camera-driver behavior and physical display support require local checks beyond mocked lifecycle tests.
 
 ## Planned choices
-- Optional temporal-model training/export with subject/session-separated evaluation. Real model quality remains contingent on suitable, authorized data.
 - Local JSONL events and overlays. No footage uploads or external notification service by default.
 
 ## Technical references
@@ -64,3 +65,11 @@ Each active track owns a fixed-size deque. Histories are independent, include mi
 `TemporalStateClassifier` consumes one complete feature window and returns a `StateDecision`. It first rejects missing, unready, low-confidence, or non-contiguous evidence as `unknown`. Settled lying posture maps to `fallen`; a recent upright-to-wider transition with sufficient downward displacement and speed maps to `falling`; stable upright posture maps to `normal`; every other case remains `unknown`.
 
 `TemporalStateStage` composes an arbitrary feature stage with deterministic, track-ordered classification. Decisions expose the relevant thresholds and measurements but keep confidence null because the rules have not been statistically calibrated. The existing `run_pipeline` default still uses `UnavailablePredictor`; this boundary prevents a library-level synthetic baseline from being presented as working end-to-end video detection. See [STATE_BASELINE.md](STATE_BASELINE.md).
+
+## Temporal training and export boundary
+
+`training.py` converts exact-length `TemporalFeatureWindow` values into a versioned numeric layout with time offsets, observation flags, normalized box/motion values, box-relative keypoints, and explicit joint masks. The same validator reads JSONL sequences and rejects partial, duplicate, non-finite, mislabeled, or structurally incompatible data. `unknown` is excluded from supervised targets.
+
+Splits are grouped by pseudonymous subject, so every session and sequence for that subject stays in one partition. Deterministic hashing with the configured seed makes assignments independent of file order. The manifest preserves the dataset SHA-256, schema, feature and class order, and assignments. A training plan stays blocked when data is absent or the training split lacks a supervised class.
+
+`TemporalModelExporter` is an injection boundary rather than a bundled training framework. Its output is staged, loaded on CPU, checked for exact feature/logit shapes and schema metadata, exercised with a finite smoke tensor, and only then published without overwriting an existing artifact. The default CLI does not invoke a trainer. No dataset or learned model exists in the repository, so model availability and end-to-end fall detection remain false. See [TRAINING.md](TRAINING.md).

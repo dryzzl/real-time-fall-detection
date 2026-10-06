@@ -15,6 +15,14 @@ from .pose import OnnxPoseEstimator, PoseError, load_pose_config
 from .sources import synthetic_frames
 from .preview import Preview
 from .state import load_state_config, run_state_smoke
+from .training import (
+    TrainingError,
+    load_training_config,
+    prepare_training_plan,
+    run_training_smoke,
+    verify_temporal_onnx_contract,
+    write_split_manifest,
+)
 from .tracking import load_tracker_config, run_tracking_smoke
 
 
@@ -57,22 +65,75 @@ def main(argv: list[str] | None = None) -> int:
     features.add_argument("--config", type=Path, help="Feature TOML configuration")
     state = commands.add_parser("state-smoke", help="Run explainable temporal-state sequence checks")
     state.add_argument("--config", type=Path, help="State baseline TOML configuration")
+    training = commands.add_parser(
+        "training-check", help="Validate temporal training data and build a leakage-safe split plan"
+    )
+    training.add_argument("--config", type=Path, help="Training TOML configuration")
+    training.add_argument("--dataset", type=Path, help="Authorized labeled JSONL dataset")
+    training.add_argument(
+        "--manifest-output", type=Path,
+        help="Write a new split manifest after the dataset passes validation",
+    )
+    training.add_argument(
+        "--smoke", action="store_true",
+        help="Run synthetic schema/split checks without training or writing an artifact",
+    )
+    temporal_model = commands.add_parser(
+        "temporal-model-check", help="Validate an exported temporal ONNX model contract"
+    )
+    temporal_model.add_argument("--config", type=Path, help="Training TOML configuration")
+    temporal_model.add_argument("--model", type=Path, help="Local temporal ONNX model path")
     args = parser.parse_args(argv)
     if args.command == "status":
         print(json.dumps({
-            "version": __version__, "milestone": "6/10",
+            "version": __version__, "milestone": "7/10",
             "implemented": ["configuration", "frame_contract", "synthetic_stream", "pipeline", "jsonl_output",
                             "webcam_input", "local_video_input", "optional_preview", "headless_capture",
                             "onnx_pose_adapter", "letterbox_preprocessing", "pose_output_decoding",
                             "person_tracking", "stable_track_ids", "stale_track_expiry",
                             "normalized_pose_features", "motion_features", "temporal_feature_windows",
-                            "explainable_state_baseline", "per_person_state_decisions"],
+                            "explainable_state_baseline", "per_person_state_decisions",
+                            "temporal_dataset_contract", "subject_separated_splits",
+                            "temporal_onnx_export_contract"],
             "baseline_state_classifier_available": True,
+            "trained_temporal_model_available": False,
             "fall_detection_available": False,
-            "next": "training_and_export_preparation",
+            "next": "persistent_local_alert_lifecycle",
         }))
         return 0
     try:
+        if args.command == "temporal-model-check":
+            training_config = load_training_config(
+                args.config, model_path=args.model,
+            )
+            contract = verify_temporal_onnx_contract(
+                training_config.model_path, training_config,
+            )
+            print(json.dumps({
+                "event": "temporal_model_check",
+                **contract.as_record(),
+                "smoke_run": True,
+                "fall_detection_available": False,
+            }, allow_nan=False))
+            return 0
+        if args.command == "training-check":
+            training_config = load_training_config(
+                args.config, dataset_path=args.dataset,
+            )
+            if args.smoke:
+                if args.manifest_output is not None:
+                    raise TrainingError("--manifest-output cannot be used with --smoke")
+                print(json.dumps(run_training_smoke(training_config), allow_nan=False))
+                return 0
+            plan = prepare_training_plan(training_config)
+            record = plan.as_record()
+            if args.manifest_output is not None:
+                if not plan.ready or plan.manifest is None:
+                    raise TrainingError("a valid, ready dataset is required to write a split manifest")
+                write_split_manifest(args.manifest_output, plan.manifest, training_config)
+                record["manifest_output"] = str(args.manifest_output)
+            print(json.dumps(record, allow_nan=False))
+            return 0
         if args.command == "state-smoke":
             print(json.dumps(run_state_smoke(load_state_config(args.config)), allow_nan=False))
             return 0
@@ -130,6 +191,6 @@ def main(argv: list[str] | None = None) -> int:
     except KeyboardInterrupt:
         print("Interrupted; any completed output records have been preserved.", file=sys.stderr)
         return 130
-    except (ValueError, OSError, CaptureError, PoseError) as error:
+    except (ValueError, OSError, CaptureError, PoseError, TrainingError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 2

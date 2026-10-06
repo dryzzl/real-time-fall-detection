@@ -212,3 +212,43 @@ Limitations and blockers:
 Next milestone: define the dataset and split contracts, build local temporal-model training/export interfaces, test data handling, and record the learned model artifact as blocked unless authorized labeled data is supplied.
 
 Remote CI for this commit is checked after publication; the result is reported with the commit link.
+
+## Milestone 7 — temporal-model data and export preparation
+
+Date: 2026-10-05
+
+Status: complete against the milestone's data-handling, split-design, and export-interface acceptance gates (7 of 10 planned milestones). No authorized labeled dataset was available, so no training, evaluation, or learned model artifact was produced.
+
+Implemented:
+
+- `training.py`: strict training configuration, a versioned fixed-shape JSONL sequence contract, canonical feature names, runtime-window encoding, bounded loading, duplicate/non-finite rejection, and explicit `normal`/`falling`/`fallen` supervised labels. `unknown` cannot become a training target.
+- Required pseudonymous subject/session identifiers and an authorization reference on every record. The reference is traceability metadata, not automatic proof of consent or licensing.
+- Deterministic subject-grouped train/validation/test assignment. Every session and sequence for one subject stays in one partition; at least three subjects and nonempty splits are required. Manifests include the complete dataset SHA-256, seed, feature/class order, counts, and assignments and never overwrite an existing file.
+- `TrainingPlan` readiness checks that revalidate record/manifest identity, dataset fingerprint, subject isolation, labels, and all three training classes before an injected backend can run.
+- `TemporalModelExporter` and atomic no-overwrite publication boundary. A future export must load on CPU with one `features` tensor, one `logits` tensor, the configured shapes, ordered classes, schema metadata, and a finite smoke output before it is accepted.
+- `configs/training.toml`, `training-check`, `temporal-model-check`, version `0.1.0.dev7`, updated status/architecture/README, and a dedicated training/export contract document.
+- Twenty-two training tests cover configuration, schema round trips, malformed/missing/non-finite inputs, bounded loading, runtime feature encoding, deterministic subject/session isolation, manifest integrity/no-overwrite behavior, absent data, missing classes, blocked exporters, real ONNX Runtime contract verification, safe artifact publication, and CLI smoke/readiness output.
+
+Validation performed on Linux with Python 3.12.14, NumPy 2.5.3, ONNX Runtime 1.30.0, ONNX 1.23.1, and OpenCV 4.13.0:
+
+- `.venv/bin/python -m pip install --no-build-isolation -e '.[headless,model,test]'`: passed after installing the declared `setuptools>=68` build requirement; installed version `0.1.0.dev7`.
+- `.venv/bin/python -m pip check`: passed with no broken requirements.
+- `.venv/bin/python -m unittest discover -s tests -v`: **130 tests passed, none skipped**.
+- `PYTHONPATH=src python -m unittest tests.test_training -v`: **22 training tests passed** through the dependency-free path; the four optional real-ONNX tests skipped as declared in that environment.
+- `.venv/bin/python -m unittest tests.test_training.ExportContractTests -v`: **4 export-contract tests passed** with real ONNX and ONNX Runtime. A temporary constant graph tested interfaces and graph validation only; it was not trained and produced no metrics.
+- `.venv/bin/fall-detection training-check --config configs/training.toml --smoke`: passed nine synthetic contract records, created deterministic 5/2/2 sequence splits, reported no subject leakage, and kept training/artifact/detection availability false.
+- `.venv/bin/fall-detection training-check --config configs/training.toml`: reported `authorized_labeled_dataset_missing`, zero sequences, no training, and no artifact.
+- `.venv/bin/fall-detection status`: reported milestone 7/10, version `0.1.0.dev7`, no trained temporal model, end-to-end detection unavailable, and persistent local alerts next.
+- `.venv/bin/python -m compileall -q src tests`: passed.
+
+Limitations and blockers:
+
+- The learned temporal model artifact is blocked on a suitable authorized labeled dataset with pseudonymous subject/session groupings and documented label provenance. The repository does not contain or download footage, feature datasets, or temporal weights.
+- The required `authorization_id` records a claim for auditability; code cannot verify that consent, licensing, privacy, retention, and permitted-use requirements were actually satisfied. The user must supply and verify that documentation before training.
+- The split is deterministic and subject-separated but not claimed to be class-stratified. Data collection must cover all classes and important viewpoints, environments, occlusions, near-fall confounders, and demographic variation before training or evaluation.
+- The constant ONNX fixtures validate shapes, metadata, CPU execution, and safe publication only. They are not learned classifiers and provide no accuracy, recall, precision, calibration, latency, or safety evidence.
+- The default `demo` and `capture` commands remain on `UnavailablePredictor`; no model was integrated and end-to-end fall detection remains false.
+
+Next milestone: implement a persistent local alert lifecycle with state transitions, cooldown/acknowledgment, duplicate suppression, local JSONL events, and overlay-ready alert state. No external notifications or emergency-service calls will be added.
+
+Remote CI for this commit is checked after publication; the result is reported with the commit link.

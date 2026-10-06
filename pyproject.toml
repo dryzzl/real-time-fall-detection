@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "real-time-fall-detection"
-version = "0.1.0.dev6"
+version = "0.1.0.dev7"
 description = "A staged Python project for real-time pose-based fall detection."
 readme = "README.md"
 requires-python = ">=3.11"

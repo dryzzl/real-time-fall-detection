@@ -1,0 +1,10 @@
+[training]
+dataset_path = "data/temporal_sequences.jsonl"
+model_path = "models/temporal_state.onnx"
+sequence_length = 30
+keypoint_count = 17
+train_fraction = 0.70
+validation_fraction = 0.15
+test_fraction = 0.15
+split_seed = "fall-detection-v1"
+max_sequences = 100000
