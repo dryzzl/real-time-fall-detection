@@ -1,0 +1,5 @@
+[alerts]
+fallen_persistence_seconds = 1.0
+cooldown_seconds = 10.0
+max_tracks = 1000
+fsync_events = true

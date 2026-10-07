@@ -5,6 +5,7 @@ import os
 import re
 import sys
 
+from .alerts import AlertSnapshot, visible_alert_overlays
 from .capture import CaptureError, load_opencv
 from .contracts import FramePacket, Prediction
 
@@ -26,11 +27,30 @@ class Preview:
             raise CaptureError(f"could not create preview window: {error}") from error
         return self
 
-    def show(self, frame: FramePacket, prediction: Prediction) -> bool:
+    def show(
+        self,
+        frame: FramePacket,
+        prediction: Prediction,
+        alerts: tuple[AlertSnapshot, ...] = (),
+    ) -> bool:
         pixels = self.np.frombuffer(frame.bgr, dtype=self.np.uint8).reshape(frame.height, frame.width, 3).copy()
         try:
             self.cv.putText(pixels, f"{prediction.state.value} | {prediction.reason}", (12, 28),
                             self.cv.FONT_HERSHEY_SIMPLEX, 0.6, (0, 210, 255), 2)
+            for index, overlay in enumerate(visible_alert_overlays(alerts)):
+                top = 42 + index * 54
+                bottom = min(frame.height - 1, top + 48)
+                self.cv.rectangle(
+                    pixels, (0, top), (frame.width - 1, bottom), (20, 20, 20), -1,
+                )
+                self.cv.putText(
+                    pixels, overlay.headline, (12, min(bottom - 22, top + 20)),
+                    self.cv.FONT_HERSHEY_SIMPLEX, 0.65, overlay.color_bgr, 2,
+                )
+                self.cv.putText(
+                    pixels, overlay.detail, (12, min(bottom - 5, top + 40)),
+                    self.cv.FONT_HERSHEY_SIMPLEX, 0.45, (235, 235, 235), 1,
+                )
             self.cv.imshow(self.title, pixels)
             key = self.cv.waitKey(1) & 0xFF
         except self.cv.error as error:

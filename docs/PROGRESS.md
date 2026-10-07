@@ -252,3 +252,41 @@ Limitations and blockers:
 Next milestone: implement a persistent local alert lifecycle with state transitions, cooldown/acknowledgment, duplicate suppression, local JSONL events, and overlay-ready alert state. No external notifications or emergency-service calls will be added.
 
 Remote CI for this commit is checked after publication; the result is reported with the commit link.
+
+## Milestone 8 — persistent local alert lifecycle
+
+Date: 2026-10-06
+
+Status: complete against the milestone's persistence, reset, and duplicate-suppression acceptance gates (8 of 10 planned milestones). Alerts are local process state and metadata only; no external messages, emergency-service calls, or safety claims were added.
+
+Implemented:
+
+- `alerts.py`: strict alert configuration and a per-track state machine with `idle`, `pending`, `active`, `acknowledged`, and `cooldown` states. A continuous configurable `fallen` interval is required before an alert opens.
+- Active alerts stay latched through later `normal` and `unknown` decisions. Acknowledgment records that an incident was seen but does not clear it. Reset requires both acknowledgment and a current `normal` decision, then enters cooldown; only a later `normal` decision after the deadline rearms the track.
+- One `alert_opened` transition is emitted per incident. Cooldown suppresses repeated alerts, tracks are independent, frame/source-time order is strict, and process-local track storage is bounded without silently discarding non-idle incidents.
+- `JsonlAlertLog`: a validated append-only local journal with contiguous event IDs, per-event flush, optional `fsync`, safe continuation after reopen, and create-new mode that never overwrites an existing smoke log. Records contain state metadata only and no pixels, poses, recipients, credentials, or network destinations.
+- `PersistentAlertStage` composes per-frame state decisions with alert updates. `AlertSnapshot` carries finite, overlay-ready status values, and `Preview.show` can draw pending/active/acknowledged banners while preserving its existing two-argument callback behavior.
+- `configs/alerts.toml`, dependency-free `alert-smoke` CLI, version `0.1.0.dev8`, updated status/architecture/README, and a dedicated alert lifecycle and safety document.
+- Twenty-two alert tests cover configuration, event schema validation, journal persistence and no-overwrite behavior, continuous fallen evidence, latching, acknowledgment/reset guards, cooldown/rearm, duplicate suppression, independent tracks, order and capacity validation, stage composition, preview rendering, finite metadata, and CLI smoke output.
+
+Validation performed on Linux with Python 3.12.14, NumPy 2.5.3, ONNX Runtime 1.30.0, ONNX 1.23.2, and OpenCV 4.13.0:
+
+- `.venv/bin/python -m pip install 'setuptools>=68'` followed by `.venv/bin/python -m pip install -e '.[headless,model,test]'`: passed in a new virtual environment; installed version `0.1.0.dev8`.
+- `.venv/bin/python -m pip check`: passed with no broken requirements.
+- `.venv/bin/python -m unittest discover -s tests -v`: **152 tests passed, none skipped**.
+- `PYTHONPATH=src python -m unittest tests.test_alerts -q`: **22 alert tests passed** through the dependency-free path.
+- `.venv/bin/fall-detection alert-smoke --config configs/alerts.toml --event-log outputs/milestone8-alert-smoke.jsonl`: passed. The synthetic lifecycle recorded pending, one alert opening, acknowledgment, guarded reset, cooldown, and rearm; the alert remained latched after a normal observation, duplicate opening was suppressed, exactly five local transition records were written, no external action occurred, and fall detection remained unavailable.
+- `.venv/bin/fall-detection status`: reported milestone 8/10, version `0.1.0.dev8`, persistent local alert components available, external notifications unavailable, end-to-end fall detection unavailable, and replay evaluation/latency next.
+- `.venv/bin/python -m compileall -q src tests`: passed.
+
+Limitations and blockers:
+
+- Synthetic state inputs validate lifecycle behavior only. No authorized real footage, production pose weights, trained temporal artifact, accuracy metric, latency measurement, or real-world alert validation exists.
+- The JSONL journal is a durable transition audit, not a restart checkpoint. Runtime alert state and track IDs are process-local; restarting does not reconstruct an active incident from the journal.
+- The alert stage is a library composition boundary and is not connected to the default `demo` or `capture` commands, which still use `UnavailablePredictor`. This prevents unavailable inference from being represented as a normal condition or a completed safety system.
+- Local acknowledgment and reset require explicit method calls by a future runtime/UI integration. No external notification channel, contact list, credential handling, footage upload, or emergency-service integration is implemented.
+- No blocker prevented this milestone. Reproducible real-input evaluation in the next milestone requires user-authorized replay recordings and authorized pose/temporal model artifacts; without them, real quality and latency results must remain unmeasured.
+
+Next milestone: build a reproducible replay evaluation and regression-reporting harness, including timing and class/outcome accounting, while reporting missing authorized inputs and model artifacts explicitly rather than inventing measurements.
+
+Remote CI for this commit is checked after publication; the result is reported with the commit link.

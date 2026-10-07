@@ -7,6 +7,7 @@ from pathlib import Path
 import sys
 
 from . import __version__
+from .alerts import AlertError, JsonlAlertLog, load_alert_config, run_alert_smoke
 from .capture import CaptureConfig, CaptureError, open_capture
 from .config import load_config
 from .features import load_feature_config, run_feature_smoke
@@ -83,10 +84,18 @@ def main(argv: list[str] | None = None) -> int:
     )
     temporal_model.add_argument("--config", type=Path, help="Training TOML configuration")
     temporal_model.add_argument("--model", type=Path, help="Local temporal ONNX model path")
+    alerts = commands.add_parser(
+        "alert-smoke", help="Run the local persistent-alert lifecycle without external actions"
+    )
+    alerts.add_argument("--config", type=Path, help="Alert TOML configuration")
+    alerts.add_argument(
+        "--event-log", type=Path,
+        help="Write transitions to a new local JSONL file; existing files are not overwritten",
+    )
     args = parser.parse_args(argv)
     if args.command == "status":
         print(json.dumps({
-            "version": __version__, "milestone": "7/10",
+            "version": __version__, "milestone": "8/10",
             "implemented": ["configuration", "frame_contract", "synthetic_stream", "pipeline", "jsonl_output",
                             "webcam_input", "local_video_input", "optional_preview", "headless_capture",
                             "onnx_pose_adapter", "letterbox_preprocessing", "pose_output_decoding",
@@ -94,14 +103,29 @@ def main(argv: list[str] | None = None) -> int:
                             "normalized_pose_features", "motion_features", "temporal_feature_windows",
                             "explainable_state_baseline", "per_person_state_decisions",
                             "temporal_dataset_contract", "subject_separated_splits",
-                            "temporal_onnx_export_contract"],
+                            "temporal_onnx_export_contract", "persistent_local_alerts",
+                            "alert_acknowledgment", "alert_cooldown", "local_alert_event_log",
+                            "alert_overlay"],
             "baseline_state_classifier_available": True,
             "trained_temporal_model_available": False,
+            "persistent_local_alerts_available": True,
+            "external_notifications_available": False,
             "fall_detection_available": False,
-            "next": "persistent_local_alert_lifecycle",
+            "next": "replay_evaluation_and_latency",
         }))
         return 0
     try:
+        if args.command == "alert-smoke":
+            alert_config = load_alert_config(args.config)
+            if args.event_log is None:
+                result = run_alert_smoke(alert_config)
+            else:
+                with JsonlAlertLog(
+                    args.event_log, fsync=alert_config.fsync_events, create_new=True,
+                ) as event_log:
+                    result = run_alert_smoke(alert_config, event_log)
+            print(json.dumps(result, allow_nan=False))
+            return 0
         if args.command == "temporal-model-check":
             training_config = load_training_config(
                 args.config, model_path=args.model,
@@ -191,6 +215,6 @@ def main(argv: list[str] | None = None) -> int:
     except KeyboardInterrupt:
         print("Interrupted; any completed output records have been preserved.", file=sys.stderr)
         return 130
-    except (ValueError, OSError, CaptureError, PoseError, TrainingError) as error:
+    except (ValueError, OSError, AlertError, CaptureError, PoseError, TrainingError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 2

@@ -4,7 +4,7 @@ The completed pipeline is intended to follow this flow:
 
 `video source → pose estimator → person tracks → temporal features → state classifier → local alerts / overlay`
 
-Milestone 7 includes synthetic input, OpenCV webcam/local-video capture, a CPU ONNX pose adapter, deterministic person tracking, normalized temporal feature windows, an explainable state baseline, temporal dataset/split contracts, and a verified future ONNX export boundary. Persistent alerting, evaluation, and end-to-end runtime integration remain later milestones. No trained temporal artifact is present.
+Milestone 8 includes synthetic input, OpenCV webcam/local-video capture, a CPU ONNX pose adapter, deterministic person tracking, normalized temporal feature windows, an explainable state baseline, temporal dataset/split/export contracts, and a persistent local alert lifecycle with metadata journaling and preview banners. Evaluation and end-to-end runtime integration remain later milestones. No trained temporal artifact is present.
 
 ## Current contracts
 
@@ -17,6 +17,7 @@ Milestone 7 includes synthetic input, OpenCV webcam/local-video capture, a CPU O
 - `StateDecision`: a per-track `FallState`, machine-readable reason, explicit evidence, and no fabricated probability. `unknown` covers missing, insufficient, low-confidence, and ambiguous evidence.
 - `TemporalSequence` / `SplitManifest`: fixed-shape labeled features with pseudonymous subject/session groups, authorization references, a dataset fingerprint, and deterministic subject-separated assignments.
 - `TemporalModelContract`: a CPU-verified ONNX input/output and metadata boundary for future injected training backends; compatibility is not model quality.
+- `AlertSnapshot` / `AlertEvent`: latched per-track lifecycle state, overlay-ready presentation, and minimal local transition metadata with no image or notification payload.
 - `run_pipeline`: consumes one frame at a time, checks temporal order, optionally paces replay, and emits metadata records without image bytes. An optional per-frame callback receives the frame and prediction after pacing and emission; returning false stops without reading another frame.
 
 Source time and wall time are different. Features use source timestamps; runtime diagnostics use a monotonic clock. Synthetic throughput is not representative of future model latency.
@@ -30,7 +31,8 @@ Camera timestamps use monotonic acquisition time. Video positions are relative t
 Preview is optional and loaded only when requested. It displays the pipeline's current prediction and reason, supports Q/Esc and window close, and never substitutes a normal state for unavailable inference. Headless mode makes no GUI calls. Camera-driver behavior and physical display support require local checks beyond mocked lifecycle tests.
 
 ## Planned choices
-- Local JSONL events and overlays. No footage uploads or external notification service by default.
+
+- Replay evaluation and regression reporting remain separate from synthetic contract tests.
 
 ## Technical references
 
@@ -73,3 +75,11 @@ Each active track owns a fixed-size deque. Histories are independent, include mi
 Splits are grouped by pseudonymous subject, so every session and sequence for that subject stays in one partition. Deterministic hashing with the configured seed makes assignments independent of file order. The manifest preserves the dataset SHA-256, schema, feature and class order, and assignments. A training plan stays blocked when data is absent or the training split lacks a supervised class.
 
 `TemporalModelExporter` is an injection boundary rather than a bundled training framework. Its output is staged, loaded on CPU, checked for exact feature/logit shapes and schema metadata, exercised with a finite smoke tensor, and only then published without overwriting an existing artifact. The default CLI does not invoke a trainer. No dataset or learned model exists in the repository, so model availability and end-to-end fall detection remain false. See [TRAINING.md](TRAINING.md).
+
+## Local alert lifecycle
+
+`PersistentAlertStage` consumes per-track `StateDecision` values and updates `AlertManager` using the frame's source timestamp. A `fallen` decision first enters pending and must remain uninterrupted for the configured duration before opening. Open alerts latch through all later inference states. Acknowledgment is distinct from reset; reset requires the latest observation to be `normal`, enters cooldown, and rearms only on a later `normal` decision after the deadline.
+
+Each transition can be appended to `JsonlAlertLog` with strict schema/sequence validation, flush, and optional fsync. Events contain identifiers, source time, statuses, observed state, and reason only. Logs do not contain pixels, poses, credentials, recipients, or network operations. `AlertSnapshot` exposes high-contrast local overlay values, and `Preview.show` can render them without changing its existing two-argument callback contract.
+
+Runtime alert state is process-local; the journal is a persistent audit history rather than a restart checkpoint. The default `run_pipeline` path still uses `UnavailablePredictor` and is not wired to the alert stage, so detection remains unavailable rather than producing synthetic safety outcomes. See [ALERTS.md](ALERTS.md).

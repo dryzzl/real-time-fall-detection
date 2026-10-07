@@ -2,7 +2,7 @@
 
 A Python project for detecting falls from video through pose estimation, motion tracking, and temporal analysis.
 
-**Development status: milestone 7 of 10 — temporal-model data and export preparation.** This version streams synthetic frames, a local video, or a webcam; can validate a user-supplied YOLO11-pose ONNX model; tracks people; builds temporal features; and provides an explainable state baseline. It now also validates labeled sequence data, creates subject-separated train/validation/test manifests, and verifies future temporal ONNX exports. No authorized labeled dataset or trained temporal artifact is present, and default streaming predictions remain `unknown` with `detection_not_implemented`.
+**Development status: milestone 8 of 10 — persistent local alert lifecycle.** This version streams synthetic frames, a local video, or a webcam; provides pose/tracking/feature/state libraries; validates temporal training/export contracts; and now supports latched per-person alerts with local acknowledgment, guarded reset, cooldown, duplicate suppression, JSONL transition logs, and preview overlays. No authorized labeled dataset or trained temporal artifact is present, and default streaming predictions remain `unknown` with `detection_not_implemented`.
 
 ## Install
 
@@ -81,6 +81,13 @@ fall-detection training-check --config configs/training.toml
 # Validate a future temporal model's ONNX graph and CPU smoke inference
 fall-detection temporal-model-check --config configs/training.toml \
   --model models/temporal_state.onnx
+
+# Dependency-free persistent-alert lifecycle check
+fall-detection alert-smoke --config configs/alerts.toml
+
+# Same check with a new local metadata-only event journal
+fall-detection alert-smoke --config configs/alerts.toml \
+  --event-log outputs/alert-smoke.jsonl
 ```
 
 `python -m fall_detection` is an alternative to the installed command. Camera index `0` usually selects the default webcam; another index may be needed. Video paths must name existing local files. Streaming URLs are not supported. Decoded frames retain their native dimensions. `configs/default.toml` configures the synthetic demo only.
@@ -127,6 +134,12 @@ Training records use a versioned, fixed-shape JSONL contract with pseudonymous s
 
 The repository defines an injected training/export interface but does not choose a trainer or fabricate weights. A future export must expose the configured `[batch, sequence_length, feature_width]` float input, three ordered logits, required schema metadata, and a finite CPU smoke result. Dataset files, footage, and model artifacts remain excluded from Git. See [the full dataset, split, and temporal ONNX contract](docs/TRAINING.md).
 
+## Persistent local alerts
+
+`AlertManager` requires a configurable continuous `fallen` interval before opening an alert. Once opened, that incident remains latched through later `normal` or `unknown` decisions. Local acknowledgment records that the alert was seen but does not clear it. Reset is allowed only after acknowledgment and a current `normal` observation; cooldown then suppresses duplicates until another `normal` decision explicitly rearms the track.
+
+Transition events can be written to a validated append-only local JSONL journal with per-event flush. Records contain state metadata only—never images, keypoints, credentials, recipients, or network destinations. Alert snapshots provide pending/active/acknowledged banners to the optional preview. The smoke command never overwrites an existing log and performs no external action. See [the lifecycle, event schema, overlay, and safety limitations](docs/ALERTS.md).
+
 ## Timing and capture limitations
 
 | Timestamp basis | Meaning |
@@ -145,10 +158,10 @@ Video timing switches permanently to FPS estimates when positions become unrelia
 python -m unittest discover -s tests -v
 ```
 
-The suite covers configuration, frame contracts, stream ordering, capture cleanup, model metadata, letterbox transforms, output decoding, person crossings, detector-order changes, missed observations, expiry boundaries, normalized pose/motion features, low-confidence masking, independent bounded histories, state-sequence decisions, dataset validation, subject-separated splits, export safeguards, ONNX temporal-model metadata/shapes, and invalid inputs. Test extras generate an MJPG video and tiny constant-output ONNX contract fixtures in temporary directories. Synthetic tracking/features/state/training records and constant graphs contain no real people or trained weights and are not quality measurements. CI runs on Linux and Windows with Python 3.11 and 3.12.
+The suite covers configuration, frame contracts, stream ordering, capture cleanup, model metadata, letterbox transforms, output decoding, person tracking, temporal features, state decisions, dataset validation, subject-separated splits, ONNX export safeguards, alert persistence, acknowledgment/reset/cooldown, duplicate suppression, local journal integrity, preview banners, and invalid inputs. Test extras generate an MJPG video and tiny constant-output ONNX contract fixtures in temporary directories. Synthetic tracking/features/state/training/alert records and constant graphs contain no real people or trained weights and are not quality measurements. CI runs on Linux and Windows with Python 3.11 and 3.12.
 
 Physical webcam/display validation is separate from automated tests. On a local desktop, run the preview and bounded-camera commands above; verify that frames appear, Q/Esc and window close stop cleanly, Ctrl+C releases the device, and the camera can reopen. Also check that disconnecting it reports an error. **These hardware checks have not been performed in this development environment.** See [the progress log](docs/PROGRESS.md), [roadmap](docs/ROADMAP.md), and [architecture](docs/ARCHITECTURE.md).
 
 ## Scope
 
-This is a development prototype, not a medical or emergency-response device. There are no accuracy, recall, or clinical-validation claims for this repository. The synthetic sources and generated test video do not depict a person or a fall. The explainable state baseline and training-contract smoke tests prove code behavior, not real-world quality. A trained temporal model requires suitable authorized labeled sequences; the current artifact is explicitly blocked rather than replaced by synthetic training or invented results.
+This is a development prototype, not a medical or emergency-response device. There are no accuracy, recall, or clinical-validation claims for this repository. The synthetic sources and generated test video do not depict a person or a fall. State, training-contract, and alert-lifecycle smoke tests prove code behavior, not real-world quality. The project has no external notification or emergency-service integration. A trained temporal model requires suitable authorized labeled sequences; the current artifact is explicitly blocked rather than replaced by synthetic training or invented results.
