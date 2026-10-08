@@ -4,7 +4,7 @@ The completed pipeline is intended to follow this flow:
 
 `video source → pose estimator → person tracks → temporal features → state classifier → local alerts / overlay`
 
-Milestone 8 includes synthetic input, OpenCV webcam/local-video capture, a CPU ONNX pose adapter, deterministic person tracking, normalized temporal feature windows, an explainable state baseline, temporal dataset/split/export contracts, and a persistent local alert lifecycle with metadata journaling and preview banners. Evaluation and end-to-end runtime integration remain later milestones. No trained temporal artifact is present.
+Milestone 9's code includes synthetic input, OpenCV webcam/local-video capture, a CPU ONNX pose adapter, deterministic person tracking, normalized temporal feature windows, an explainable state baseline, temporal dataset/split/export contracts, persistent local alerts, and a held-out temporal-model evaluation/reporting harness. The actual-input evaluation gate and end-to-end runtime integration remain incomplete because no authorized labeled dataset, split manifest, or trained temporal artifact is present.
 
 ## Current contracts
 
@@ -18,6 +18,7 @@ Milestone 8 includes synthetic input, OpenCV webcam/local-video capture, a CPU O
 - `TemporalSequence` / `SplitManifest`: fixed-shape labeled features with pseudonymous subject/session groups, authorization references, a dataset fingerprint, and deterministic subject-separated assignments.
 - `TemporalModelContract`: a CPU-verified ONNX input/output and metadata boundary for future injected training backends; compatibility is not model quality.
 - `AlertSnapshot` / `AlertEvent`: latched per-track lifecycle state, overlay-ready presentation, and minimal local transition metadata with no image or notification payload.
+- `EvaluationPlan` / held-out report: exact dataset/manifest/model identity, test-only membership, class outcomes, regression failures, and CPU temporal-model latency without synthetic metric substitution.
 - `run_pipeline`: consumes one frame at a time, checks temporal order, optionally paces replay, and emits metadata records without image bytes. An optional per-frame callback receives the frame and prediction after pacing and emission; returning false stops without reading another frame.
 
 Source time and wall time are different. Features use source timestamps; runtime diagnostics use a monotonic clock. Synthetic throughput is not representative of future model latency.
@@ -32,7 +33,7 @@ Preview is optional and loaded only when requested. It displays the pipeline's c
 
 ## Planned choices
 
-- Replay evaluation and regression reporting remain separate from synthetic contract tests.
+- End-to-end supported runtime integration remains separate from library composition and temporal-model-only evaluation.
 
 ## Technical references
 
@@ -83,3 +84,9 @@ Splits are grouped by pseudonymous subject, so every session and sequence for th
 Each transition can be appended to `JsonlAlertLog` with strict schema/sequence validation, flush, and optional fsync. Events contain identifiers, source time, statuses, observed state, and reason only. Logs do not contain pixels, poses, credentials, recipients, or network operations. `AlertSnapshot` exposes high-contrast local overlay values, and `Preview.show` can render them without changing its existing two-argument callback contract.
 
 Runtime alert state is process-local; the journal is a persistent audit history rather than a restart checkpoint. The default `run_pipeline` path still uses `UnavailablePredictor` and is not wired to the alert stage, so detection remains unavailable rather than producing synthetic safety outcomes. See [ALERTS.md](ALERTS.md).
+
+## Held-out evaluation boundary
+
+`EvaluationPlan` validates a labeled sequence dataset against its exact subject-separated manifest and verifies the temporal ONNX graph before any metric is produced. Evaluation selects only `test` assignments, requires all supervised classes, orders sequences deterministically, warms the CPU provider, repeats timed inference, and rejects nondeterministic class results. The report binds the canonical dataset, exact files, model, runtime environment, outcomes, and regression failures by digest and metadata.
+
+Synthetic smoke checks exercise accounting but cannot produce a quality report. Current readiness reports three missing artifacts and keeps real-world metrics unavailable. The latency scope is the temporal-model ONNX call, not video decode, pose, tracking, features, or alert delivery. See [EVALUATION.md](EVALUATION.md).

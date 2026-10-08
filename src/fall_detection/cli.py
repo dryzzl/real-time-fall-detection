@@ -10,6 +10,14 @@ from . import __version__
 from .alerts import AlertError, JsonlAlertLog, load_alert_config, run_alert_smoke
 from .capture import CaptureConfig, CaptureError, open_capture
 from .config import load_config
+from .evaluation import (
+    EvaluationError,
+    load_evaluation_config,
+    prepare_evaluation_plan,
+    run_evaluation,
+    run_evaluation_smoke,
+    write_evaluation_report,
+)
 from .features import load_feature_config, run_feature_smoke
 from .pipeline import run_pipeline
 from .pose import OnnxPoseEstimator, PoseError, load_pose_config
@@ -92,10 +100,31 @@ def main(argv: list[str] | None = None) -> int:
         "--event-log", type=Path,
         help="Write transitions to a new local JSONL file; existing files are not overwritten",
     )
+    evaluation = commands.add_parser(
+        "evaluation-check",
+        help="Validate held-out replay inputs or generate a reproducible evaluation report",
+    )
+    evaluation.add_argument("--config", type=Path, help="Evaluation TOML configuration")
+    evaluation.add_argument(
+        "--training-config", type=Path,
+        help="Training TOML that defines the dataset and temporal model contracts",
+    )
+    evaluation.add_argument("--dataset", type=Path, help="Authorized labeled sequence JSONL")
+    evaluation.add_argument("--manifest", type=Path, help="Subject-separated split manifest")
+    evaluation.add_argument("--model", type=Path, help="Trained temporal ONNX model")
+    evaluation.add_argument(
+        "--report-output", type=Path,
+        help="Run evaluation and write a new report; existing files are not overwritten",
+    )
+    evaluation.add_argument(
+        "--smoke", action="store_true",
+        help="Run synthetic accounting checks without producing quality metrics",
+    )
     args = parser.parse_args(argv)
     if args.command == "status":
         print(json.dumps({
             "version": __version__, "milestone": "8/10",
+            "development_stage": "milestone_9_evaluation_harness",
             "implemented": ["configuration", "frame_contract", "synthetic_stream", "pipeline", "jsonl_output",
                             "webcam_input", "local_video_input", "optional_preview", "headless_capture",
                             "onnx_pose_adapter", "letterbox_preprocessing", "pose_output_decoding",
@@ -105,16 +134,51 @@ def main(argv: list[str] | None = None) -> int:
                             "temporal_dataset_contract", "subject_separated_splits",
                             "temporal_onnx_export_contract", "persistent_local_alerts",
                             "alert_acknowledgment", "alert_cooldown", "local_alert_event_log",
-                            "alert_overlay"],
+                            "alert_overlay", "held_out_evaluation_contract",
+                            "confusion_and_per_class_metrics", "cpu_model_latency_measurement",
+                            "regression_case_reporting"],
             "baseline_state_classifier_available": True,
             "trained_temporal_model_available": False,
             "persistent_local_alerts_available": True,
+            "evaluation_harness_available": True,
+            "real_replay_evaluation_available": False,
+            "milestone_9_acceptance_complete": False,
             "external_notifications_available": False,
             "fall_detection_available": False,
-            "next": "replay_evaluation_and_latency",
+            "next": "provide_authorized_replay_sequences_split_manifest_and_trained_model",
         }))
         return 0
     try:
+        if args.command == "evaluation-check":
+            evaluation_config = load_evaluation_config(
+                args.config, split_manifest_path=args.manifest,
+            )
+            if args.smoke:
+                if any(value is not None for value in (
+                        args.training_config, args.dataset, args.manifest,
+                        args.model, args.report_output)):
+                    raise EvaluationError(
+                        "--smoke cannot be combined with input, model, manifest, or report overrides"
+                    )
+                print(json.dumps(run_evaluation_smoke(), allow_nan=False))
+                return 0
+            training_config = load_training_config(
+                args.training_config or evaluation_config.training_config_path,
+                dataset_path=args.dataset, model_path=args.model,
+            )
+            plan = prepare_evaluation_plan(evaluation_config, training_config)
+            if args.report_output is None:
+                print(json.dumps(plan.as_record(), allow_nan=False))
+                return 0
+            if not plan.ready:
+                raise EvaluationError(
+                    "authorized held-out inputs and a contract-compatible trained model are required: "
+                    + ", ".join(plan.blockers)
+                )
+            report = run_evaluation(plan)
+            write_evaluation_report(args.report_output, report)
+            print(json.dumps({**report, "report_output": str(args.report_output)}, allow_nan=False))
+            return 0
         if args.command == "alert-smoke":
             alert_config = load_alert_config(args.config)
             if args.event_log is None:
@@ -215,6 +279,9 @@ def main(argv: list[str] | None = None) -> int:
     except KeyboardInterrupt:
         print("Interrupted; any completed output records have been preserved.", file=sys.stderr)
         return 130
-    except (ValueError, OSError, AlertError, CaptureError, PoseError, TrainingError) as error:
+    except (
+        ValueError, OSError, AlertError, CaptureError, EvaluationError,
+        PoseError, TrainingError,
+    ) as error:
         print(f"error: {error}", file=sys.stderr)
         return 2

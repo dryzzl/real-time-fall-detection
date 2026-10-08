@@ -346,7 +346,12 @@ class SplitManifest:
         }
 
 
-def _dataset_digest(records: Sequence[TemporalSequence]) -> str:
+def dataset_digest(records: Sequence[TemporalSequence]) -> str:
+    """Return the canonical digest used to bind datasets to split manifests."""
+    if not isinstance(records, (tuple, list)) or not records:
+        raise TrainingError("records must be a nonempty tuple or list")
+    if any(not isinstance(record, TemporalSequence) for record in records):
+        raise TrainingError("records must contain TemporalSequence values")
     digest = sha256()
     for sequence in sorted(records, key=lambda item: item.sequence_id):
         encoded = json.dumps(
@@ -414,7 +419,7 @@ def build_subject_split(
     }
     if any(count == 0 for count in sequence_counts.values()):
         raise TrainingError("train, validation, and test splits must all be nonempty")
-    return SplitManifest(_dataset_digest(records), assignments, sequence_counts, subject_counts)
+    return SplitManifest(dataset_digest(records), assignments, sequence_counts, subject_counts)
 
 
 def write_split_manifest(path: Path, manifest: SplitManifest, config: TrainingConfig) -> None:
@@ -444,7 +449,7 @@ class TrainingPlan:
         }
         if (len(assignments_by_id) != len(self.manifest.assignments)
                 or set(records_by_id) != set(assignments_by_id)
-                or self.manifest.dataset_sha256 != _dataset_digest(self.records)):
+                or self.manifest.dataset_sha256 != dataset_digest(self.records)):
             return False
         split_by_subject: dict[str, set[str]] = {}
         training_labels = set()

@@ -290,3 +290,43 @@ Limitations and blockers:
 Next milestone: build a reproducible replay evaluation and regression-reporting harness, including timing and class/outcome accounting, while reporting missing authorized inputs and model artifacts explicitly rather than inventing measurements.
 
 Remote CI for this commit is checked after publication; the result is reported with the commit link.
+
+## Milestone 9 — held-out replay evaluation and regression reporting
+
+Date: 2026-10-07
+
+Status: implementation complete, but the roadmap's actual-input acceptance gate remains blocked (8 of 10 planned milestones complete). No real evaluation report, quality metric, or latency benchmark was produced because the required authorized sequences, split manifest, and trained model are absent.
+
+Implemented:
+
+- `evaluation.py`: strict evaluation configuration, immutable split-manifest loading, dataset/manifest fingerprint validation, exact assignment and subject-separation checks, and held-out test selection. The test split must include `normal`, `falling`, and `fallen` before evaluation can run.
+- CPU-only temporal ONNX replay over labeled feature sequences. Configurable warmups are excluded from timing; each held-out sequence receives repeated timed runs, and differing class results across repetitions fail closed.
+- Aggregate report contract with canonical dataset and exact file digests, split-manifest digest, model digest, runtime environment, supervised-by-predicted confusion matrix (including explicit `unknown`), accuracy, non-unknown coverage, macro/per-class precision/recall/F1, bounded pseudonymous regression failures, and temporal-model latency distribution.
+- Honest scope fields: the evaluator records that authorization and model-training provenance are not verified by software, evaluation is not clinical validation, no external benchmark is used, and latency excludes decode, pose, tracking, features, preview, and alerts.
+- Exclusive report publication that never overwrites an existing path. A blocked plan cannot produce a quality report.
+- Dependency-free `evaluation-check --smoke` that exercises ordering, incorrect/unknown outcomes, regression counts, and latency accounting while omitting accuracy/F1, setting real-world measurement false, and refusing report publication.
+- `configs/evaluation.toml`, version `0.1.0.dev9`, README/architecture updates, and a dedicated evaluation contract document.
+- Sixteen evaluation tests cover configuration, manifest round trips and tampering, dataset identity, subject-separated membership, explicit missing-input blockers, required class support, deterministic inference, confusion/per-class/regression/latency accounting, invalid predictors and clocks, report fingerprints/no-overwrite safeguards, CLI honesty, and a real CPU ONNX Runtime evaluation/report path.
+
+Validation performed on Linux with Python 3.12.14, NumPy 2.5.3, ONNX Runtime 1.30.0, ONNX 1.23.2, and OpenCV 4.13.0:
+
+- `.venv/bin/python -m pip install 'setuptools>=68'` followed by `.venv/bin/python -m pip install -e '.[headless,model,test]'`: passed in a new virtual environment; installed version `0.1.0.dev9`.
+- `.venv/bin/python -m pip check`: passed with no broken requirements.
+- `.venv/bin/python -m unittest discover -s tests -v`: **168 tests passed, none skipped**.
+- `.venv/bin/python -m unittest tests.test_evaluation -v`: **16 evaluation tests passed**. The optional test built a temporary constant-output ONNX contract fixture, ran it through a real CPU ONNX Runtime session, exercised repeated timing and report creation, and verified no-overwrite behavior. The fixture was not trained and its outcomes are not quality or latency evidence.
+- `.venv/bin/fall-detection evaluation-check --smoke`: passed six synthetic contract cases, including four expected matches, one mismatch, one explicit `unknown`, and 12 validated timing samples. It emitted no accuracy or F1 and reported quality metrics unavailable.
+- `.venv/bin/fall-detection evaluation-check --config configs/evaluation.toml`: returned a successful blocked readiness record with `authorized_labeled_replay_sequences_missing`, `held_out_split_manifest_missing`, and `trained_temporal_model_missing`; sequence counts and all metric/artifact fields remained empty or false.
+- `.venv/bin/fall-detection status`: reported version `0.1.0.dev9`, milestone count 8/10, the evaluation harness available, actual evaluation incomplete, and end-to-end fall detection unavailable.
+- `.venv/bin/python -m compileall -q src tests`: passed.
+
+Limitations and blockers:
+
+- The actual-input acceptance gate cannot be completed without a suitable authorized labeled sequence JSONL, the split manifest generated from that exact dataset, and a contract-compatible trained temporal ONNX model. The held-out test split must contain all three supervised labels.
+- Authorization IDs are supplied claims, not proof of consent or licensing. The current ONNX metadata contract verifies shape/schema/class compatibility but does not prove which dataset trained the model. Both provenance obligations require user verification.
+- The evaluator consumes encoded temporal feature sequences, not raw footage. Reported CPU timing covers temporal-model inference only and is not end-to-end camera latency.
+- No real dataset, manifest, model, report, footage, credentials, or external message was added. The synthetic and constant-graph tests validate code behavior only; all real-world accuracy, recall, precision, F1, and latency values remain unavailable.
+- Because milestone 9 remains incomplete, milestone 10 integration hardening must not be started under the checked-in earliest-incomplete-milestone rule.
+
+Next step: provide verified authorized labeled temporal sequences with pseudonymous subject/session groups and all three labels, generate their subject-separated manifest, and supply the contract-compatible trained temporal ONNX model. Then run the held-out report and complete milestone 9 before starting milestone 10.
+
+Remote CI for this commit is checked after publication; the result is reported with the commit link.

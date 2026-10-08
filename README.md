@@ -2,7 +2,7 @@
 
 A Python project for detecting falls from video through pose estimation, motion tracking, and temporal analysis.
 
-**Development status: milestone 8 of 10 — persistent local alert lifecycle.** This version streams synthetic frames, a local video, or a webcam; provides pose/tracking/feature/state libraries; validates temporal training/export contracts; and now supports latched per-person alerts with local acknowledgment, guarded reset, cooldown, duplicate suppression, JSONL transition logs, and preview overlays. No authorized labeled dataset or trained temporal artifact is present, and default streaming predictions remain `unknown` with `detection_not_implemented`.
+**Development status: 8 of 10 milestones complete; milestone 9's evaluation harness is implemented but its actual-input acceptance gate is blocked.** The project now validates immutable held-out splits, can replay labeled feature sequences through a matching temporal ONNX model, measures CPU model latency, and creates fingerprinted confusion/per-class/regression reports. No authorized labeled replay dataset, split manifest, or trained temporal artifact is present, so no real quality or latency result exists and default streaming predictions remain `unknown` with `detection_not_implemented`.
 
 ## Install
 
@@ -88,6 +88,16 @@ fall-detection alert-smoke --config configs/alerts.toml
 # Same check with a new local metadata-only event journal
 fall-detection alert-smoke --config configs/alerts.toml \
   --event-log outputs/alert-smoke.jsonl
+
+# Honest evaluation readiness check; currently reports three missing artifacts
+fall-detection evaluation-check --config configs/evaluation.toml
+
+# Synthetic accounting smoke check; never emits quality metrics
+fall-detection evaluation-check --smoke
+
+# After supplying authorized data, its split manifest, and a matching trained model
+fall-detection evaluation-check --config configs/evaluation.toml \
+  --report-output outputs/held-out-evaluation.json
 ```
 
 `python -m fall_detection` is an alternative to the installed command. Camera index `0` usually selects the default webcam; another index may be needed. Video paths must name existing local files. Streaming URLs are not supported. Decoded frames retain their native dimensions. `configs/default.toml` configures the synthetic demo only.
@@ -140,6 +150,12 @@ The repository defines an injected training/export interface but does not choose
 
 Transition events can be written to a validated append-only local JSONL journal with per-event flush. Records contain state metadata only—never images, keypoints, credentials, recipients, or network destinations. Alert snapshots provide pending/active/acknowledged banners to the optional preview. The smoke command never overwrites an existing log and performs no external action. See [the lifecycle, event schema, overlay, and safety limitations](docs/ALERTS.md).
 
+## Held-out replay evaluation
+
+The evaluation harness requires the authorized labeled sequence dataset, its exact subject-separated split manifest, and a contract-compatible trained temporal ONNX model. It validates dataset/manifest identity and model metadata before evaluating only the held-out test split. Reports contain artifact fingerprints, a confusion matrix including explicit `unknown` predictions, accuracy and coverage, macro and per-class metrics, bounded regression failures, temporal-model CPU latency, and runtime-environment details. Reports never overwrite existing files. Model metadata compatibility does not prove training provenance, which remains an external verification requirement.
+
+The dependency-free evaluation smoke command tests accounting logic with explicit synthetic fixtures but omits accuracy and F1 and cannot write a quality report. The current readiness check reports the missing dataset, manifest, and model rather than inventing results. Evaluation covers encoded temporal sequences and model inference only—not raw-video or full-pipeline latency. See [the evaluation contract, commands, metrics, and limitations](docs/EVALUATION.md).
+
 ## Timing and capture limitations
 
 | Timestamp basis | Meaning |
@@ -158,10 +174,10 @@ Video timing switches permanently to FPS estimates when positions become unrelia
 python -m unittest discover -s tests -v
 ```
 
-The suite covers configuration, frame contracts, stream ordering, capture cleanup, model metadata, letterbox transforms, output decoding, person tracking, temporal features, state decisions, dataset validation, subject-separated splits, ONNX export safeguards, alert persistence, acknowledgment/reset/cooldown, duplicate suppression, local journal integrity, preview banners, and invalid inputs. Test extras generate an MJPG video and tiny constant-output ONNX contract fixtures in temporary directories. Synthetic tracking/features/state/training/alert records and constant graphs contain no real people or trained weights and are not quality measurements. CI runs on Linux and Windows with Python 3.11 and 3.12.
+The suite covers configuration, frame contracts, stream ordering, capture cleanup, model metadata, letterbox transforms, output decoding, person tracking, temporal features, state decisions, dataset validation, subject-separated splits, ONNX export safeguards, alert persistence, local journal integrity, preview banners, evaluation-manifest integrity, held-out metrics, regression accounting, CPU temporal-model timing, report no-overwrite behavior, and invalid inputs. Test extras generate an MJPG video and tiny constant-output ONNX contract fixtures in temporary directories. Synthetic tracking/features/state/training/alert/evaluation records and constant graphs contain no real people or trained weights and are not quality measurements. CI runs on Linux and Windows with Python 3.11 and 3.12.
 
 Physical webcam/display validation is separate from automated tests. On a local desktop, run the preview and bounded-camera commands above; verify that frames appear, Q/Esc and window close stop cleanly, Ctrl+C releases the device, and the camera can reopen. Also check that disconnecting it reports an error. **These hardware checks have not been performed in this development environment.** See [the progress log](docs/PROGRESS.md), [roadmap](docs/ROADMAP.md), and [architecture](docs/ARCHITECTURE.md).
 
 ## Scope
 
-This is a development prototype, not a medical or emergency-response device. There are no accuracy, recall, or clinical-validation claims for this repository. The synthetic sources and generated test video do not depict a person or a fall. State, training-contract, and alert-lifecycle smoke tests prove code behavior, not real-world quality. The project has no external notification or emergency-service integration. A trained temporal model requires suitable authorized labeled sequences; the current artifact is explicitly blocked rather than replaced by synthetic training or invented results.
+This is a development prototype, not a medical or emergency-response device. There are no accuracy, recall, latency, or clinical-validation claims for the current repository because its required real evaluation artifacts are absent. Synthetic sources and generated fixtures do not depict a person or a fall. State, training, alert, and evaluation smoke tests prove code behavior, not real-world quality. The project has no external notification or emergency-service integration. A trained temporal model and real evaluation report require suitable authorized labeled sequences; both remain explicitly blocked rather than replaced by synthetic training or invented results.
