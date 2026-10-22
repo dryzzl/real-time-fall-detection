@@ -11,7 +11,7 @@ from fall_detection.state import StateConfig
 def frame(index):
     return FramePacket(
         index=index, timestamp_seconds=index * 0.2,
-        width=80, height=80, bgr=b"\\0" * (80 * 80 * 3),
+        width=80, height=80, bgr=bytes(80 * 80 * 3),
         source="synthetic_fixture",
     )
 
