@@ -10,6 +10,7 @@ import sys
 from .capture import CaptureConfig, CaptureError, open_capture
 from .features import load_feature_config
 from .live import run_live_pipeline
+from .live_preview import LivePreview
 from .pose import OnnxPoseEstimator, PoseError, load_pose_config
 from .state import load_state_config
 from .tracking import load_tracker_config
@@ -30,6 +31,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-frames", type=int)
     parser.add_argument("--fallback-fps", type=float, default=30.0)
     parser.add_argument("--output", type=Path, help="Write new JSONL file; never overwrite")
+    display = parser.add_mutually_exclusive_group()
+    display.add_argument("--preview", action="store_true", help="Local pose/track overlay (unvalidated); Q/Esc quits")
+    display.add_argument("--headless", action="store_true", help="No window (default)")
     args = parser.parse_args(argv)
 
     try:
@@ -45,6 +49,7 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError("pose and feature keypoint counts must match")
         with ExitStack() as stack:
             frames = stack.enter_context(open_capture(capture))
+            preview = stack.enter_context(LivePreview()) if args.preview else None
             if args.output:
                 args.output.parent.mkdir(parents=True, exist_ok=True)
             stream = stack.enter_context(
@@ -58,6 +63,7 @@ def main(argv: list[str] | None = None) -> int:
             summary = run_live_pipeline(
                 frames, emit, estimator=pose,
                 tracker_config=tracker, feature_config=features, state_config=state,
+                on_visual_frame=preview.show_live if preview is not None else None,
             )
             emit(summary.as_record())
         if args.output:
