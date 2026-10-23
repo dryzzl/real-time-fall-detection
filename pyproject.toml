@@ -18,6 +18,7 @@ test = ["onnx>=1.17,<2"]
 
 [project.scripts]
 fall-detection = "fall_detection.cli:main"
+fall-detection-live = "fall_detection.live_cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
