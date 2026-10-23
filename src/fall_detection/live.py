@@ -9,7 +9,7 @@ import time
 from typing import Protocol
 
 from .contracts import FallState, FramePacket
-from .features import FeatureConfig, PoseTrackingFeatureStage, TemporalFeatureBank
+from .features import FeatureConfig, PoseTrackingFeatureStage, TemporalFeatureBank, TemporalFeatureWindow
 from .pipeline import RunSummary
 from .state import StateConfig, StateDecision, TemporalStateClassifier
 from .tracking import PersonTracker, PoseTrackingStage, TrackerConfig
@@ -28,6 +28,7 @@ def run_live_pipeline(
     feature_config: FeatureConfig | None = None,
     state_config: StateConfig | None = None,
     on_frame: Callable[[FramePacket, tuple[StateDecision, ...]], bool] | None = None,
+    on_visual_frame: Callable[[FramePacket, tuple[TemporalFeatureWindow, ...], tuple[StateDecision, ...]], bool] | None = None,
     clock: Callable[[], float] = time.perf_counter,
 ) -> RunSummary:
     """Emit bounded per-person pose/temporal decisions, never raw pixels."""
@@ -76,6 +77,8 @@ def run_live_pipeline(
         count += 1
         last_index = frame.index
         last_timestamp = frame.timestamp_seconds
+        if on_visual_frame is not None and not on_visual_frame(frame, windows, decisions):
+            break
         if on_frame is not None and not on_frame(frame, decisions):
             break
     elapsed = max(0.0, clock() - started)
