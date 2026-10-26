@@ -1,61 +1,95 @@
-"""Synthetic temporal alert-policy regression tests (not model validation)."""
-from dataclasses import dataclass
-import pytest
+"""Temporal robustness regressions against the production alert lifecycle.
 
-@dataclass
-class AlertPolicy:
-    trigger_frames: int = 3
-    clear_frames: int = 5
-    missing_tolerance: int = 2
+These synthetic state sequences test alert behavior, not detector accuracy.
+Run with: python -m unittest discover -s tests -v
+"""
 
-    def __post_init__(self):
-        if min(self.trigger_frames, self.clear_frames) < 1 or self.missing_tolerance < 0:
-            raise ValueError("Invalid thresholds")
-        self.active = False
-        self.fallen = self.normal = self.missing = 0
+import unittest
 
-    def update(self, state: str | None) -> bool:
-        if state is None:
-            self.missing += 1
-            if self.missing > self.missing_tolerance:
-                self.fallen = 0
-            return self.active
-        if state not in {"Normal", "Falling", "Fallen"}:
-            raise ValueError("Unknown state")
-        self.missing = 0
-        if state == "Fallen":
-            self.fallen += 1
-            self.normal = 0
-            if self.fallen >= self.trigger_frames:
-                self.active = True
-        elif state == "Normal":
-            self.fallen = 0
-            self.normal += 1
-            if self.normal >= self.clear_frames:
-                self.active = False
-        else:
-            self.fallen = self.normal = 0
-        return self.active
+from fall_detection.alerts import AlertConfig, AlertError, AlertManager, AlertStatus
+from fall_detection.contracts import FallState
+from fall_detection.state import StateDecision, StateEvidence
 
-def test_single_frame():
-    p = AlertPolicy()
-    assert [p.update(s) for s in ("Normal", "Fallen", "Normal")] == [False] * 3
 
-def test_persistent():
-    p = AlertPolicy()
-    for _ in range(3): p.update("Fallen")
-    assert p.active
-    for _ in range(4): assert p.update("Normal")
-    assert not p.update("Normal")
+def decision(track_id: int, frame: int, state: FallState) -> StateDecision:
+    return StateDecision(
+        track_id=track_id,
+        frame_index=frame,
+        state=state,
+        reason=f"synthetic_{state.value}",
+        evidence=StateEvidence(3, 1.0, 1.5 if state is FallState.FALLEN else 0.5, 0.0),
+    )
 
-def test_occlusion():
-    p = AlertPolicy()
-    for _ in range(3): p.update("Fallen")
-    for _ in range(4): assert p.update(None)
 
-def test_falling():
-    p = AlertPolicy()
-    for _ in range(10): assert not p.update("Falling")
+class TemporalAlertRobustnessTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.manager = AlertManager(AlertConfig(
+            fallen_persistence_seconds=1.0,
+            cooldown_seconds=2.0,
+            fsync_events=False,
+        ))
 
-def test_invalid():
-    with pytest.raises(ValueError): AlertPolicy().update("Unknown")
+    def update(self, frame: int, state: FallState, time: float,
+               track_id: int = 1) -> AlertStatus:
+        return self.manager.update(decision(track_id, frame, state), time).status
+
+    def test_single_fallen_observation_cannot_open_alert(self):
+        self.assertEqual(self.update(0, FallState.NORMAL, 0.0), AlertStatus.IDLE)
+        self.assertEqual(self.update(1, FallState.FALLEN, 0.1), AlertStatus.PENDING)
+        self.assertEqual(self.update(2, FallState.NORMAL, 0.2), AlertStatus.IDLE)
+        self.assertEqual(
+            [event.transition for event in self.manager.events],
+            ["pending_started", "pending_cancelled"],
+        )
+
+    def test_falling_state_alone_never_opens_alert(self):
+        for frame in range(10):
+            self.assertEqual(
+                self.update(frame, FallState.FALLING, frame * 0.2),
+                AlertStatus.IDLE,
+            )
+        self.assertEqual(self.manager.events, ())
+
+    def test_unknown_cancels_pending_but_not_active(self):
+        self.assertEqual(self.update(0, FallState.FALLEN, 0.0), AlertStatus.PENDING)
+        self.assertEqual(self.update(1, FallState.UNKNOWN, 0.5), AlertStatus.IDLE)
+        self.assertEqual(self.update(2, FallState.FALLEN, 1.0), AlertStatus.PENDING)
+        self.assertEqual(self.update(3, FallState.FALLEN, 2.0), AlertStatus.ACTIVE)
+        for frame, time in ((4, 2.2), (5, 2.4), (6, 3.0)):
+            self.assertEqual(self.update(frame, FallState.UNKNOWN, time), AlertStatus.ACTIVE)
+        self.assertEqual(
+            [event.transition for event in self.manager.events].count("alert_opened"), 1
+        )
+
+    def test_active_alert_requires_acknowledgment_and_guarded_reset(self):
+        self.update(0, FallState.FALLEN, 0.0)
+        self.assertEqual(self.update(1, FallState.FALLEN, 1.0), AlertStatus.ACTIVE)
+        self.assertEqual(self.update(2, FallState.NORMAL, 1.5), AlertStatus.ACTIVE)
+        with self.assertRaises(AlertError):
+            self.manager.reset(1, 1.6)
+        self.assertEqual(self.manager.acknowledge(1, 1.7).status, AlertStatus.ACKNOWLEDGED)
+        self.assertEqual(self.manager.reset(1, 1.8).status, AlertStatus.COOLDOWN)
+        self.assertEqual(self.update(3, FallState.FALLEN, 2.0), AlertStatus.COOLDOWN)
+        self.assertEqual(self.update(4, FallState.NORMAL, 3.9), AlertStatus.IDLE)
+
+    def test_independent_tracks_do_not_share_alert_state(self):
+        self.assertEqual(self.update(0, FallState.FALLEN, 0.0, 1), AlertStatus.PENDING)
+        self.assertEqual(self.update(0, FallState.NORMAL, 0.0, 2), AlertStatus.IDLE)
+        self.assertEqual(self.update(1, FallState.FALLEN, 1.0, 1), AlertStatus.ACTIVE)
+        self.assertEqual(self.update(1, FallState.FALLING, 1.0, 2), AlertStatus.IDLE)
+        self.assertEqual(self.manager.snapshot(1).status, AlertStatus.ACTIVE)
+        self.assertEqual(self.manager.snapshot(2).status, AlertStatus.IDLE)
+
+    def test_rejected_out_of_order_frames_leave_state_unchanged(self):
+        self.update(0, FallState.FALLEN, 0.0)
+        before = self.manager.snapshot(1)
+        events = self.manager.events
+        for frame, time in ((0, 0.5), (1, 0.0), (1, float("nan"))):
+            with self.subTest(frame=frame, time=time), self.assertRaises(AlertError):
+                self.update(frame, FallState.FALLEN, time)
+            self.assertEqual(self.manager.snapshot(1), before)
+            self.assertEqual(self.manager.events, events)
+
+
+if __name__ == "__main__":
+    unittest.main()
