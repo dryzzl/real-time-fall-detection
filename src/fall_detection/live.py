@@ -12,6 +12,7 @@ from .contracts import FallState, FramePacket
 from .features import FeatureConfig, PoseTrackingFeatureStage, TemporalFeatureBank, TemporalFeatureWindow
 from .pipeline import RunSummary
 from .state import StateConfig, StateDecision, TemporalStateClassifier
+from .temporal_inference import OnnxTemporalClassifier
 from .tracking import PersonTracker, PoseTrackingStage, TrackerConfig
 
 
@@ -27,6 +28,7 @@ def run_live_pipeline(
     tracker_config: TrackerConfig | None = None,
     feature_config: FeatureConfig | None = None,
     state_config: StateConfig | None = None,
+    temporal_classifier: OnnxTemporalClassifier | None = None,
     on_frame: Callable[[FramePacket, tuple[StateDecision, ...]], bool] | None = None,
     on_visual_frame: Callable[[FramePacket, tuple[TemporalFeatureWindow, ...], tuple[StateDecision, ...]], bool] | None = None,
     clock: Callable[[], float] = time.perf_counter,
@@ -36,7 +38,7 @@ def run_live_pipeline(
         PoseTrackingStage(estimator, PersonTracker(tracker_config)),
         TemporalFeatureBank(feature_config),
     )
-    classifier = TemporalStateClassifier(state_config)
+    classifier = temporal_classifier if temporal_classifier is not None else TemporalStateClassifier(state_config)
     started = clock()
     count = 0
     first_timestamp = 0.0
@@ -68,8 +70,10 @@ def run_live_pipeline(
             "height": frame.height,
             "state": FallState.UNKNOWN.value,
             "confidence": None,
-            "reason": "per_person_heuristic_baseline_only",
-            "state_source": "heuristic_baseline_unvalidated",
+            "reason": ("per_person_onnx_research_only" if temporal_classifier is not None
+                       else "per_person_heuristic_baseline_only"),
+            "state_source": ("onnx_temporal_unvalidated" if temporal_classifier is not None
+                             else "heuristic_baseline_unvalidated"),
             "fall_detection_available": False,
             "tracked_person_count": len(people),
             "people": people,
