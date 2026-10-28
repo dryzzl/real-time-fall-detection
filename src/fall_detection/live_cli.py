@@ -13,6 +13,8 @@ from .live import run_live_pipeline
 from .live_preview import LivePreview
 from .pose import OnnxPoseEstimator, PoseError, load_pose_config
 from .state import load_state_config
+from .temporal_inference import OnnxTemporalClassifier
+from .training import TrainingError, load_training_config
 from .tracking import load_tracker_config
 
 
@@ -24,6 +26,8 @@ def main(argv: list[str] | None = None) -> int:
     source.add_argument("--camera", type=int, help="Local webcam index, usually 0")
     source.add_argument("--video", type=Path, help="Existing local video file")
     parser.add_argument("--model", type=Path, help="Raw YOLO11-Pose ONNX export")
+    parser.add_argument("--temporal-model", type=Path, help="Validated-contract temporal ONNX model (research only)")
+    parser.add_argument("--training-config", type=Path, default=Path("configs/training.toml"))
     parser.add_argument("--pose-config", type=Path, default=Path("configs/pose.toml"))
     parser.add_argument("--tracker-config", type=Path, default=Path("configs/tracker.toml"))
     parser.add_argument("--feature-config", type=Path, default=Path("configs/features.toml"))
@@ -45,6 +49,13 @@ def main(argv: list[str] | None = None) -> int:
         tracker = load_tracker_config(args.tracker_config)
         features = load_feature_config(args.feature_config)
         state = load_state_config(args.state_config)
+        temporal = None
+        if args.temporal_model is not None:
+            training = load_training_config(args.training_config)
+            if (training.sequence_length != features.window_size
+                    or training.keypoint_count != features.keypoint_count):
+                raise ValueError("training sequence/keypoint dimensions must match feature configuration")
+            temporal = OnnxTemporalClassifier(args.temporal_model, training)
         if pose.config.keypoint_count != features.keypoint_count:
             raise ValueError("pose and feature keypoint counts must match")
         with ExitStack() as stack:
@@ -63,6 +74,7 @@ def main(argv: list[str] | None = None) -> int:
             summary = run_live_pipeline(
                 frames, emit, estimator=pose,
                 tracker_config=tracker, feature_config=features, state_config=state,
+                temporal_classifier=temporal,
                 on_visual_frame=preview.show_live if preview is not None else None,
             )
             emit(summary.as_record())
@@ -72,7 +84,7 @@ def main(argv: list[str] | None = None) -> int:
     except KeyboardInterrupt:
         print("Interrupted; completed output records were preserved.", file=sys.stderr)
         return 130
-    except (ValueError, OSError, CaptureError, PoseError) as error:
+    except (ValueError, OSError, CaptureError, PoseError, TrainingError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 2
 
