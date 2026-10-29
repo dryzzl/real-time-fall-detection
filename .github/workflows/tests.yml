@@ -26,3 +26,4 @@ jobs:
       - run: fall-detection status
       - run: fall-detection demo --frames 3 --output outputs/smoke.jsonl
       - run: python -m fall_detection.live_stress --frames 150 --people 4 --width 160 --height 120
+      - run: python -m fall_detection.temporal_benchmark --synthetic-fixture --iterations 5 --warmup 2
