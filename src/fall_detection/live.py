@@ -32,6 +32,7 @@ def run_live_pipeline(
     on_frame: Callable[[FramePacket, tuple[StateDecision, ...]], bool] | None = None,
     on_visual_frame: Callable[[FramePacket, tuple[TemporalFeatureWindow, ...], tuple[StateDecision, ...]], bool] | None = None,
     clock: Callable[[], float] = time.perf_counter,
+    on_timing: Callable[[dict[str, float]], None] | None = None,
 ) -> RunSummary:
     """Emit bounded per-person pose/temporal decisions, never raw pixels."""
     stage = PoseTrackingFeatureStage(
@@ -49,8 +50,11 @@ def run_live_pipeline(
             raise ValueError("frame indices and timestamps must increase strictly")
         if count == 0:
             first_timestamp = frame.timestamp_seconds
+        frame_started = clock() if on_timing is not None else None
         windows = stage.process(frame)
+        features_done = clock() if on_timing is not None else None
         decisions = classifier.classify_many(windows)
+        classification_done = clock() if on_timing is not None else None
         people = [
             {
                 **decision.as_record(),
@@ -78,6 +82,14 @@ def run_live_pipeline(
             "tracked_person_count": len(people),
             "people": people,
         })
+        if on_timing is not None:
+            emit_done = clock()
+            on_timing({
+                "pose_tracking_features_ms": (features_done - frame_started) * 1000.0,
+                "classification_ms": (classification_done - features_done) * 1000.0,
+                "record_emit_ms": (emit_done - classification_done) * 1000.0,
+                "total_ms": (emit_done - frame_started) * 1000.0,
+            })
         count += 1
         last_index = frame.index
         last_timestamp = frame.timestamp_seconds

@@ -14,6 +14,7 @@ import tracemalloc
 from .contracts import FramePacket
 from .features import FeatureConfig
 from .live import run_live_pipeline
+from .live_latency import FrameLatencyCollector
 from .pose import Keypoint, PoseDetection
 
 
@@ -53,6 +54,7 @@ def run_live_stress(
     *, frames: int = 300, people: int = 3, width: int = 160,
     height: int = 120, fps: float = 30.0,
     max_peak_memory_mib: float | None = None,
+    profile_latency: bool = False,
 ) -> dict[str, object]:
     """Exercise live tracking, bounded features and state decisions, without ML."""
     if type(frames) is not int or not 1 <= frames <= 1_000_000:
@@ -70,6 +72,9 @@ def run_live_stress(
     ):
         raise ValueError("max_peak_memory_mib must be finite and positive")
 
+    if type(profile_latency) is not bool:
+        raise ValueError("profile_latency must be a boolean")
+    profiler = FrameLatencyCollector() if profile_latency else None
     estimator = SyntheticPoseEstimator(people, width, height)
     feature_config = FeatureConfig(window_size=30, min_observed_samples=8)
     records = 0
@@ -120,7 +125,8 @@ def run_live_stress(
         tracemalloc.start()
     try:
         summary = run_live_pipeline(
-            packets(), consume, estimator=estimator, feature_config=feature_config
+            packets(), consume, estimator=estimator, feature_config=feature_config,
+            on_timing=profiler.record if profiler is not None else None,
         )
         _, peak_bytes = tracemalloc.get_traced_memory()
     finally:
@@ -136,6 +142,8 @@ def run_live_stress(
         "no_unverified_fall_predictions": unsupported_predictions == 0,
         "no_raw_pose_or_pixel_data": raw_data_leaks == 0,
     }
+    if profiler is not None:
+        checks["latency_samples_complete"] = profiler.frames_seen == frames
     if frames >= 10:
         checks["occlusions_exercised"] = missing_observations > 0
     if max_peak_memory_mib is not None:
@@ -158,6 +166,7 @@ def run_live_stress(
         "memory_scope": "tracemalloc_python_allocations_only",
         "checks": checks,
         "passed": all(checks.values()),
+        **({"latency_profile": profiler.report()} if profiler is not None else {}),
     }
 
 
@@ -172,12 +181,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--fps", type=float, default=30.0)
     parser.add_argument("--max-peak-memory-mib", type=float)
     parser.add_argument("--report", type=Path)
+    parser.add_argument("--profile-latency", action="store_true",
+                        help="Profile bounded processing latency; excludes capture and ONNX")
     args = parser.parse_args(argv)
     try:
         report = run_live_stress(
             frames=args.frames, people=args.people,
             width=args.width, height=args.height, fps=args.fps,
             max_peak_memory_mib=args.max_peak_memory_mib,
+            profile_latency=args.profile_latency,
         )
         if args.report is not None:
             args.report.parent.mkdir(parents=True, exist_ok=True)

@@ -10,6 +10,7 @@ import sys
 from .capture import CaptureConfig, CaptureError, open_capture
 from .features import load_feature_config
 from .live import run_live_pipeline
+from .live_latency import FrameLatencyCollector
 from .live_preview import LivePreview
 from .pose import OnnxPoseEstimator, PoseError, load_pose_config
 from .state import load_state_config
@@ -35,12 +36,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-frames", type=int)
     parser.add_argument("--fallback-fps", type=float, default=30.0)
     parser.add_argument("--output", type=Path, help="Write new JSONL file; never overwrite")
+    parser.add_argument("--latency-report", type=Path, help="Write bounded processing-latency JSON; never overwrite")
     display = parser.add_mutually_exclusive_group()
     display.add_argument("--preview", action="store_true", help="Local pose/track overlay (unvalidated); Q/Esc quits")
     display.add_argument("--headless", action="store_true", help="No window (default)")
     args = parser.parse_args(argv)
 
     try:
+        if (args.output is not None and args.latency_report is not None
+                and args.output.resolve() == args.latency_report.resolve()):
+            raise ValueError("--output and --latency-report must be distinct paths")
+        profiler = FrameLatencyCollector() if args.latency_report is not None else None
         capture = CaptureConfig(
             camera=args.camera, video=args.video,
             max_frames=args.max_frames, fallback_fps=args.fallback_fps,
@@ -76,8 +82,14 @@ def main(argv: list[str] | None = None) -> int:
                 tracker_config=tracker, feature_config=features, state_config=state,
                 temporal_classifier=temporal,
                 on_visual_frame=preview.show_live if preview is not None else None,
+                on_timing=profiler.record if profiler is not None else None,
             )
             emit(summary.as_record())
+            if profiler is not None:
+                args.latency_report.parent.mkdir(parents=True, exist_ok=True)
+                with args.latency_report.open("x", encoding="utf-8") as report_file:
+                    json.dump(profiler.report(), report_file, indent=2, allow_nan=False)
+                    report_file.write("\n")
         if args.output:
             print(json.dumps(summary.as_record(), allow_nan=False))
         return 0

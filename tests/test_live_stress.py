@@ -20,6 +20,15 @@ class LiveStressTests(unittest.TestCase):
         self.assertTrue(report["checks"]["no_unverified_fall_predictions"])
         self.assertFalse(report["fall_detection_available"])
 
+    def test_latency_profile_covers_every_synthetic_frame(self):
+        report = run_live_stress(frames=12, people=2, width=96, height=72, profile_latency=True)
+        self.assertTrue(report["passed"], report["checks"])
+        profile = report["latency_profile"]
+        self.assertEqual(profile["frames_seen"], 12)
+        self.assertEqual(profile["frames_sampled"], 12)
+        self.assertIsNotNone(profile["latency_ms"]["total_ms"])
+        self.assertFalse(profile["camera_to_alert_latency_measured"])
+
     def test_single_frame_is_valid_without_occlusion(self):
         report = run_live_stress(frames=1, people=1, width=48, height=48)
         self.assertTrue(report["passed"], report["checks"])
@@ -39,7 +48,7 @@ class LiveStressTests(unittest.TestCase):
             {"frames": 0}, {"people": 0}, {"people": 17},
             {"people": 4, "width": 24},
             {"fps": float("inf")}, {"fps": 0},
-            {"max_peak_memory_mib": -1},
+            {"max_peak_memory_mib": -1}, {"profile_latency": 1},
         ):
             with self.subTest(kwargs=kwargs), self.assertRaises(ValueError):
                 run_live_stress(**kwargs)
@@ -48,11 +57,12 @@ class LiveStressTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "live-stress.json"
             args = ["--frames", "12", "--people", "2",
-                    "--width", "96", "--height", "72", "--report", str(path)]
+                    "--width", "96", "--height", "72", "--profile-latency", "--report", str(path)]
             with contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(main(args), 0)
             report = json.loads(path.read_text(encoding="utf-8"))
             self.assertTrue(report["passed"])
+            self.assertEqual(report["latency_profile"]["frames_seen"], 12)
             original = path.read_bytes()
             with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
                 self.assertEqual(main(args), 2)
