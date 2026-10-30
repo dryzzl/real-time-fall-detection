@@ -109,7 +109,7 @@ class StateDecision:
     state: FallState
     reason: str
     evidence: StateEvidence
-    confidence: None = None
+    confidence: float | None = None
 
     def as_record(self) -> dict[str, object]:
         return {
