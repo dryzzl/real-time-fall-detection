@@ -64,6 +64,26 @@ class DashboardReaderTests(unittest.TestCase):
         self.assertEqual(result["people"], [{"track_id": 3, "state": "unknown"}])
         self.assertEqual(result["alerts"], [{"track_id": 3, "status": "pending"}])
 
+    def test_untrusted_scalar_metadata_is_bounded_and_finite(self):
+        self.write({
+            "event": "frame", "frame_index": 7,
+            "reason": "R" * 20_000, "state": "S" * 20_000,
+            "confidence": float("nan"), "processing_ms": float("inf"),
+            "people": [{"track_id": 1, "reason": "P" * 20_000,
+                        "confidence": float("-inf")}],
+            "alerts": [{"status": "A" * 20_000}],
+        })
+        result = read_events(self.log)["events"][0]
+        self.assertEqual(result["frame_index"], 7)
+        self.assertEqual(len(result["reason"]), 512)
+        self.assertEqual(len(result["state"]), 512)
+        self.assertEqual(len(result["people"][0]["reason"]), 512)
+        self.assertEqual(len(result["alerts"][0]["status"]), 512)
+        self.assertNotIn("confidence", result)
+        self.assertNotIn("processing_ms", result)
+        self.assertNotIn("confidence", result["people"][0])
+        self.assertLess(len(json.dumps(result)), 2500)
+
     def test_live_per_person_heuristic_fields_are_retained_without_pixels(self):
         self.write({
             "event": "frame", "frame_index": 4, "state": "unknown",

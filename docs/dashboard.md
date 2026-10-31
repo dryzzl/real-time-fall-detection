@@ -35,7 +35,7 @@ fall-detection-live --camera 0 --model models/yolo11n-pose.onnx --output outputs
 fall-detection-dashboard --log outputs/live.jsonl --port 8765
 ```
 
-Run these commands in separate terminals. The app can show tracked people and experimental state estimates, but this does not establish fall-detection accuracy. The API never returns raw frames, model binaries, keypoints, or user-selected files. The monitor is restricted to 127.0.0.1.
+Run these commands in separate terminals. The app can show tracked people and experimental state estimates, but this does not establish fall-detection accuracy. The API never returns raw frames, model binaries, keypoints, or user-selected files. All reflected string metadata fields are capped at 512 characters and nonfinite numeric values are discarded. The monitor is restricted to 127.0.0.1.
 
 ## API
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+from math import isfinite
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
@@ -17,6 +18,7 @@ from .dashboard_snapshot import read_recent_events
 
 MAX_EVENTS = 200
 MAX_LINE_BYTES = 1_000_000
+MAX_TEXT_CHARS = 512  # Bound untrusted metadata reflected in HTTP responses.
 FRAME_FIELDS = (
     "event", "source", "frame_index", "timestamp_seconds", "timestamp_basis",
     "width", "height", "state", "confidence", "reason", "mode",
@@ -35,12 +37,19 @@ ALERT_FIELDS = ("track_id", "status", "observed_state", "reason", "alert_id")
 
 
 def _safe_scalars(record: dict, fields: tuple[str, ...]) -> dict:
-    """Whitelist scalar metadata, never returning image/video blobs."""
-    return {
-        key: record[key]
-        for key in fields
-        if key in record and (record[key] is None or type(record[key]) in (str, int, float, bool))
-    }
+    """Whitelist and bound metadata; discard nonfinite numeric values."""
+    safe = {}
+    for key in fields:
+        if key not in record:
+            continue
+        value = record[key]
+        if type(value) is str:
+            safe[key] = value[:MAX_TEXT_CHARS]
+        elif value is None or type(value) in (int, bool):
+            safe[key] = value
+        elif type(value) is float and isfinite(value):
+            safe[key] = value
+    return safe
 
 
 def _sanitize_record(record: dict) -> dict | None:
