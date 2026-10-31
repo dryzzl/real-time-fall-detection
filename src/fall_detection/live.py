@@ -54,6 +54,17 @@ def run_live_pipeline(
         windows = stage.process(frame)
         features_done = clock() if on_timing is not None else None
         decisions = classifier.classify_many(windows)
+        # A classifier adapter must never silently drop, reorder, or reuse
+        # another frame's track decisions. zip() alone truncates mismatches.
+        if (not isinstance(decisions, (tuple, list))
+                or len(decisions) != len(windows)
+                or any(
+                    not isinstance(decision, StateDecision)
+                    or decision.track_id != window.track_id
+                    or decision.frame_index != frame.index
+                    for window, decision in zip(windows, decisions)
+                )):
+            raise ValueError("classifier decisions must match every current track and frame")
         classification_done = clock() if on_timing is not None else None
         people = [
             {
