@@ -10,11 +10,15 @@ from __future__ import annotations
 import argparse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+from math import isfinite
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
+from .dashboard_snapshot import read_recent_events
+
 MAX_EVENTS = 200
 MAX_LINE_BYTES = 1_000_000
+MAX_TEXT_CHARS = 512  # Bound untrusted metadata reflected in HTTP responses.
 FRAME_FIELDS = (
     "event", "source", "frame_index", "timestamp_seconds", "timestamp_basis",
     "width", "height", "state", "confidence", "reason", "mode",
@@ -33,12 +37,19 @@ ALERT_FIELDS = ("track_id", "status", "observed_state", "reason", "alert_id")
 
 
 def _safe_scalars(record: dict, fields: tuple[str, ...]) -> dict:
-    """Whitelist scalar metadata, never returning image/video blobs."""
-    return {
-        key: record[key]
-        for key in fields
-        if key in record and (record[key] is None or type(record[key]) in (str, int, float, bool))
-    }
+    """Whitelist and bound metadata; discard nonfinite numeric values."""
+    safe = {}
+    for key in fields:
+        if key not in record:
+            continue
+        value = record[key]
+        if type(value) is str:
+            safe[key] = value[:MAX_TEXT_CHARS]
+        elif value is None or type(value) in (int, bool):
+            safe[key] = value
+        elif type(value) is float and isfinite(value):
+            safe[key] = value
+    return safe
 
 
 def _sanitize_record(record: dict) -> dict | None:
@@ -216,7 +227,19 @@ async function poll(){
   }catch(err){$('connection').textContent='Connection unavailable';}
   finally{busy=false;}
 }
-poll();setInterval(poll,1000);
+async function bootstrap(){
+  try{
+    const response=await fetch('/api/snapshot?limit=100',{cache:'no-store'});
+    if(!response.ok)throw new Error('HTTP '+response.status);
+    const payload=await response.json();
+    cursor=payload.next_cursor;
+    for(const event of payload.events){if(event.event==='frame')addFrame(event);}
+    $('connection').textContent=payload.source_exists?'Reading local log':'Waiting for log';
+  }catch(err){$('connection').textContent='Snapshot unavailable';}
+  poll();
+  setInterval(poll,1000);
+}
+bootstrap();
 </script>
 </body></html>'''
 
@@ -257,6 +280,16 @@ def create_server(log_path: Path, port: int = 8765) -> ThreadingHTTPServer:
                 return
             if parsed.path == "/api/health":
                 self.send_json(200, {"ok": True, "log_exists": log_path.is_file(), "mode": "read_only_metadata"})
+                return
+            if parsed.path == "/api/snapshot":
+                try:
+                    params = parse_qs(parsed.query, keep_blank_values=True)
+                    if set(params) - {"limit"} or any(len(v) != 1 for v in params.values()):
+                        raise DashboardError("unknown or repeated query parameter")
+                    limit = int(params.get("limit", ["100"])[0])
+                    self.send_json(200, read_recent_events(log_path, _sanitize_record, limit=limit))
+                except (ValueError, OSError) as exc:
+                    self.send_json(400, {"error": str(exc)})
                 return
             if parsed.path == "/api/events":
                 try:

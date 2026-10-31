@@ -1,6 +1,6 @@
 # Local fall-detection monitoring dashboard
 
-This read-only, loopback-only full-stack demonstration serves **metadata**, not video frames, from the JSONL produced by the existing `fall-detection` and `fall-detection-live` commands. It polls incremental events every second and displays reported states, track counts, frame counts, and recent events.
+This read-only, loopback-only full-stack demonstration serves **metadata**, not video frames, from the JSONL produced by the existing `fall-detection` and `fall-detection-live` commands. It initializes from a bounded recent-event snapshot, then polls incremental events every second and displays reported states, track counts, frame counts, and recent events. The browser's frame counter is the number of frames loaded in the current session, not the all-time total in a long log.
 
 ## Installation
 
@@ -35,12 +35,13 @@ fall-detection-live --camera 0 --model models/yolo11n-pose.onnx --output outputs
 fall-detection-dashboard --log outputs/live.jsonl --port 8765
 ```
 
-Run these commands in separate terminals. The app can show tracked people and experimental state estimates, but this does not establish fall-detection accuracy. The API never returns raw frames, model binaries, keypoints, or user-selected files. The monitor is restricted to 127.0.0.1.
+Run these commands in separate terminals. The app can show tracked people and experimental state estimates, but this does not establish fall-detection accuracy. The API never returns raw frames, model binaries, keypoints, or user-selected files. All reflected string metadata fields are capped at 512 characters and nonfinite numeric values are discarded. The monitor is restricted to 127.0.0.1.
 
 ## API
 
 - `GET /` serves the dashboard.
 - `GET /api/health` checks log availability.
+- `GET /api/snapshot?limit=100` reads the newest complete JSONL records from a bounded 2 MiB tail window, returning a continuation cursor and flags for truncated history or an incomplete trailing line. This avoids replaying an entire long-running log on browser refresh.
 - `GET /api/events?cursor=0&limit=100` returns at most 200 sanitized metadata records per request and a cursor. A rotated/truncated log resets the cursor.
 
 ## Tests and stress benchmarks
