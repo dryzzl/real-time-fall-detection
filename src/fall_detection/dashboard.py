@@ -90,7 +90,9 @@ def read_events(path: Path, cursor: str = "0", limit: int = 100) -> dict:
     if not isinstance(cursor, str) or len(cursor) > 100:
         raise DashboardError("invalid cursor")
     if not path.exists():
-        return {"events": [], "next_cursor": "0", "source_exists": False, "reset": False}
+        # A removed log must invalidate the browser's previous state;
+        # otherwise stale track/fall information remains visible.
+        return {"events": [], "next_cursor": "0", "source_exists": False, "reset": cursor != "0"}
     if not path.is_file():
         raise DashboardError("log path must refer to a regular file")
 

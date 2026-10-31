@@ -33,6 +33,21 @@ class DashboardReaderTests(unittest.TestCase):
         self.assertEqual([r["frame_index"] for r in second["events"]], [1])
         self.assertEqual(read_events(self.log, second["next_cursor"])["events"], [])
 
+    def test_deleted_log_resets_cursor_and_recovery_starts_fresh(self):
+        self.write({"event": "frame", "frame_index": 40, "state": "unknown"})
+        cursor = read_events(self.log)["next_cursor"]
+        self.log.unlink()
+        missing = read_events(self.log, cursor)
+        self.assertFalse(missing["source_exists"])
+        self.assertTrue(missing["reset"])
+        self.assertEqual(missing["next_cursor"], "0")
+        self.assertEqual(missing["events"], [])
+        self.assertFalse(read_events(self.log, "0")["reset"])
+        self.write({"event": "frame", "frame_index": 0, "state": "unknown"})
+        recovered = read_events(self.log, missing["next_cursor"])
+        self.assertFalse(recovered["reset"])
+        self.assertEqual([r["frame_index"] for r in recovered["events"]], [0])
+
     def test_partial_line_is_not_lost(self):
         self.log.write_bytes(b'{"event":"frame","frame_index":0}')
         first = read_events(self.log)
@@ -156,6 +171,18 @@ class DashboardHttpTests(unittest.TestCase):
         self.assertEqual(result["events"][0]["state"], "unknown")
         self.assertNotIn("bgr", body.decode())
         self.assertEqual(json.loads(self.get("/api/events?cursor=" + quote(result["next_cursor"]))[2])["events"], [])
+
+    def test_http_log_deletion_invalidates_stale_browser_state(self):
+        first = json.loads(self.get("/api/events")[2])
+        self.log.unlink()
+        missing = json.loads(self.get("/api/events?cursor=" + quote(first["next_cursor"]))[2])
+        self.assertEqual(missing["events"], [])
+        self.assertFalse(missing["source_exists"])
+        self.assertTrue(missing["reset"])
+        self.assertEqual(missing["next_cursor"], "0")
+        self.log.write_text('{"event":"frame","frame_index":9}\\n')
+        fresh = json.loads(self.get("/api/events?cursor=0")[2])
+        self.assertEqual(fresh["events"][0]["frame_index"], 9)
 
     def test_snapshot_returns_recent_events_and_hands_off_cursor(self):
         with self.log.open("a", encoding="utf-8") as stream:
