@@ -13,6 +13,8 @@ import json
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
+from .dashboard_snapshot import read_recent_events
+
 MAX_EVENTS = 200
 MAX_LINE_BYTES = 1_000_000
 FRAME_FIELDS = (
@@ -216,7 +218,19 @@ async function poll(){
   }catch(err){$('connection').textContent='Connection unavailable';}
   finally{busy=false;}
 }
-poll();setInterval(poll,1000);
+async function bootstrap(){
+  try{
+    const response=await fetch('/api/snapshot?limit=100',{cache:'no-store'});
+    if(!response.ok)throw new Error('HTTP '+response.status);
+    const payload=await response.json();
+    cursor=payload.next_cursor;
+    for(const event of payload.events){if(event.event==='frame')addFrame(event);}
+    $('connection').textContent=payload.source_exists?'Reading local log':'Waiting for log';
+  }catch(err){$('connection').textContent='Snapshot unavailable';}
+  poll();
+  setInterval(poll,1000);
+}
+bootstrap();
 </script>
 </body></html>'''
 
@@ -257,6 +271,16 @@ def create_server(log_path: Path, port: int = 8765) -> ThreadingHTTPServer:
                 return
             if parsed.path == "/api/health":
                 self.send_json(200, {"ok": True, "log_exists": log_path.is_file(), "mode": "read_only_metadata"})
+                return
+            if parsed.path == "/api/snapshot":
+                try:
+                    params = parse_qs(parsed.query, keep_blank_values=True)
+                    if set(params) - {"limit"} or any(len(v) != 1 for v in params.values()):
+                        raise DashboardError("unknown or repeated query parameter")
+                    limit = int(params.get("limit", ["100"])[0])
+                    self.send_json(200, read_recent_events(log_path, _sanitize_record, limit=limit))
+                except (ValueError, OSError) as exc:
+                    self.send_json(400, {"error": str(exc)})
                 return
             if parsed.path == "/api/events":
                 try:

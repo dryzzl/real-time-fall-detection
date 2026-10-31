@@ -137,6 +137,46 @@ class DashboardHttpTests(unittest.TestCase):
         self.assertNotIn("bgr", body.decode())
         self.assertEqual(json.loads(self.get("/api/events?cursor=" + quote(result["next_cursor"]))[2])["events"], [])
 
+    def test_snapshot_returns_recent_events_and_hands_off_cursor(self):
+        with self.log.open("a", encoding="utf-8") as stream:
+            for index in range(1, 7):
+                stream.write(json.dumps({"event": "frame", "frame_index": index,
+                                         "raw_frame": "PRIVATE"}) + "\n")
+        status, _, body = self.get("/api/snapshot?limit=2")
+        self.assertEqual(status, 200)
+        snapshot = json.loads(body)
+        self.assertEqual([e["frame_index"] for e in snapshot["events"]], [5, 6])
+        self.assertNotIn("PRIVATE", body.decode())
+        with self.log.open("a", encoding="utf-8") as stream:
+            stream.write('{"event":"frame","frame_index":7}\n')
+        cursor = quote(snapshot["next_cursor"])
+        next_events = json.loads(self.get("/api/events?cursor=" + cursor)[2])
+        self.assertEqual([e["frame_index"] for e in next_events["events"]], [7])
+
+    def test_snapshot_preserves_partial_trailing_record(self):
+        with self.log.open("ab") as stream:
+            stream.write(b'{"event":"frame","frame_index":8}')
+        snapshot = json.loads(self.get("/api/snapshot")[2])
+        self.assertTrue(snapshot["partial_trailing_line"])
+        self.assertEqual(snapshot["events"][0]["frame_index"], 0)
+        with self.log.open("ab") as stream:
+            stream.write(b"\n")
+        cursor = quote(snapshot["next_cursor"])
+        result = json.loads(self.get("/api/events?cursor=" + cursor)[2])
+        self.assertEqual(result["events"][0]["frame_index"], 8)
+
+    def test_snapshot_rejects_invalid_queries(self):
+        for path in ("/api/snapshot?limit=0", "/api/snapshot?limit=201",
+                     "/api/snapshot?limit=1&limit=2", "/api/snapshot?cursor=0"):
+            with self.subTest(path=path), self.assertRaises(HTTPError) as context:
+                self.get(path)
+            self.assertEqual(context.exception.code, 400)
+
+    def test_dashboard_bootstraps_from_recent_snapshot(self):
+        html = self.get("/")[2].decode()
+        self.assertIn("async function bootstrap()", html)
+        self.assertIn("/api/snapshot?limit=100", html)
+
     def test_rejects_dns_rebinding_host(self):
         request = Request(self.base + "/api/events", headers={"Host": "attacker.example"})
         with self.assertRaises(HTTPError) as context:

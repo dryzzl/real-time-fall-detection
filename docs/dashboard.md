@@ -1,6 +1,6 @@
 # Local fall-detection monitoring dashboard
 
-This read-only, loopback-only full-stack demonstration serves **metadata**, not video frames, from the JSONL produced by the existing `fall-detection` and `fall-detection-live` commands. It polls incremental events every second and displays reported states, track counts, frame counts, and recent events.
+This read-only, loopback-only full-stack demonstration serves **metadata**, not video frames, from the JSONL produced by the existing `fall-detection` and `fall-detection-live` commands. It initializes from a bounded recent-event snapshot, then polls incremental events every second and displays reported states, track counts, frame counts, and recent events. The browser's frame counter is the number of frames loaded in the current session, not the all-time total in a long log.
 
 ## Installation
 
@@ -41,6 +41,7 @@ Run these commands in separate terminals. The app can show tracked people and ex
 
 - `GET /` serves the dashboard.
 - `GET /api/health` checks log availability.
+- `GET /api/snapshot?limit=100` reads the newest complete JSONL records from a bounded 2 MiB tail window, returning a continuation cursor and flags for truncated history or an incomplete trailing line. This avoids replaying an entire long-running log on browser refresh.
 - `GET /api/events?cursor=0&limit=100` returns at most 200 sanitized metadata records per request and a cursor. A rotated/truncated log resets the cursor.
 
 ## Tests and stress benchmarks
