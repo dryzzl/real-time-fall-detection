@@ -180,7 +180,7 @@ class DashboardHttpTests(unittest.TestCase):
         self.assertFalse(missing["source_exists"])
         self.assertTrue(missing["reset"])
         self.assertEqual(missing["next_cursor"], "0")
-        self.log.write_text('{"event":"frame","frame_index":9}\\n')
+        self.log.write_text('{"event":"frame","frame_index":9}\n')
         fresh = json.loads(self.get("/api/events?cursor=0")[2])
         self.assertEqual(fresh["events"][0]["frame_index"], 9)
 
@@ -218,6 +218,14 @@ class DashboardHttpTests(unittest.TestCase):
             with self.subTest(path=path), self.assertRaises(HTTPError) as context:
                 self.get(path)
             self.assertEqual(context.exception.code, 400)
+
+    def test_dashboard_labels_model_and_heuristic_as_unvalidated(self):
+        html = self.get("/")[2].decode()
+        self.assertIn("<th>Research state</th>", html)
+        self.assertIn("onnx_temporal_unvalidated", html)
+        self.assertIn("heuristic_baseline_unvalidated", html)
+        self.assertIn("ONNX temporal", html)
+        self.assertIn("unvalidated", html)
 
     def test_dashboard_bootstraps_from_recent_snapshot(self):
         html = self.get("/")[2].decode()

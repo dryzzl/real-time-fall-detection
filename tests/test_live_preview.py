@@ -38,6 +38,22 @@ class OverlayTests(unittest.TestCase):
         self.assertEqual(self.cv.line.call_count, 1)
         self.assertIn("UNVALIDATED", self.cv.putText.call_args_list[0].args[1])
 
+    def test_onnx_mode_is_explicitly_unvalidated(self):
+        decision = StateDecision(1, 0, FallState.FALLEN, "synthetic",
+                                 StateEvidence(1, 0.0, None, None))
+        render_overlay(self.cv, object(), self.frame, (fixture(),), (decision,), mode="onnx")
+        texts = [call.args[1] for call in self.cv.putText.call_args_list]
+        self.assertIn("UNVALIDATED ONNX TEMPORAL", texts[0])
+        self.assertTrue(any("(onnx, unvalidated)" in text for text in texts))
+        self.assertTrue(all("FALL ALERT" not in text or "NOT A FALL ALERT" in text for text in texts))
+
+    def test_invalid_mode_fails_before_drawing(self):
+        decision = StateDecision(1, 0, FallState.UNKNOWN, "synthetic",
+                                 StateEvidence(1, 0.0, None, None))
+        with self.assertRaisesRegex(ValueError, "preview mode"):
+            render_overlay(self.cv, object(), self.frame, (fixture(),), (decision,), mode="trained")
+        self.cv.putText.assert_not_called()
+
     def test_masked_points_not_drawn(self):
         self.draw(masked=True)
         self.cv.circle.assert_not_called()

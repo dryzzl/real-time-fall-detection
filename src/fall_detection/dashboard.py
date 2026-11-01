@@ -185,7 +185,7 @@ th{color:#9eabc3;font-weight:500}td{font-variant-numeric:tabular-nums}
 <div class="card"><div class="label">Tracked people (latest frame)</div><div class="value" id="people">—</div></div>
 <div class="card"><div class="label">Visible alerts (latest frame)</div><div class="value" id="alerts">—</div></div>
 </div>
-<section><h2>Tracked people — latest frame (unvalidated)</h2><div class="table-wrap"><table><thead><tr><th>Track</th><th>Heuristic state</th><th>Observed</th><th>Window ready</th><th>Reason</th></tr></thead><tbody id="person-rows"></tbody></table></div></section>
+<section><h2>Tracked people — latest frame (unvalidated)</h2><div class="table-wrap"><table><thead><tr><th>Track</th><th>Research state</th><th>Observed</th><th>Window ready</th><th>Reason</th></tr></thead><tbody id="person-rows"></tbody></table></div></section>
 <section><h2>Recent events</h2><div class="table-wrap"><table><thead><tr><th>Frame</th><th>Source time</th><th>State</th><th>Reason</th><th>People</th><th>Processing</th></tr></thead><tbody id="rows"></tbody></table></div></section>
 <footer><small>Runs on 127.0.0.1 only. Video frames and model weights are not served. Refreshing resets this browser's counters; no data is deleted.</small></footer>
 <script>
@@ -201,7 +201,8 @@ function addFrame(event){
   for(const person of (Array.isArray(event.people)?event.people:[])){
     const pr=document.createElement('tr');
     cell(pr,person.track_id??'—');
-    cell(pr,typeof person.state==='string'?person.state+' (heuristic)':'unknown');
+    const method=event.state_source==='onnx_temporal_unvalidated'?'ONNX temporal':event.state_source==='heuristic_baseline_unvalidated'?'heuristic':'unspecified';
+    cell(pr,typeof person.state==='string'?person.state+' ('+method+', unvalidated)':'unknown');
     cell(pr,person.observed===true?'yes':person.observed===false?'no':'—');
     cell(pr,person.window_ready===true?'yes':person.window_ready===false?'no':'—');
     cell(pr,person.reason??'—');personRows.appendChild(pr);

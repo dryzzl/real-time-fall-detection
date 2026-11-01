@@ -66,7 +66,7 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError("pose and feature keypoint counts must match")
         with ExitStack() as stack:
             frames = stack.enter_context(open_capture(capture))
-            preview = stack.enter_context(LivePreview()) if args.preview else None
+            preview = stack.enter_context(LivePreview(temporal_model=temporal is not None)) if args.preview else None
             if args.output:
                 args.output.parent.mkdir(parents=True, exist_ok=True)
             stream = stack.enter_context(
