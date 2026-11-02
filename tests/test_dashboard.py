@@ -270,6 +270,15 @@ class DashboardHttpTests(unittest.TestCase):
         self.assertIn("ONNX temporal", html)
         self.assertIn("unvalidated", html)
 
+    def test_dashboard_displays_log_freshness_separately_from_detection_state(self):
+        html = self.get("/")[2].decode()
+        self.assertIn('id="freshness"', html)
+        self.assertIn("async function refreshHealth()", html)
+        self.assertIn("fetch('/api/health'", html)
+        self.assertIn("Log idle (no recent updates)", html)
+        self.assertIn("Experimental software", html)
+        self.assertIn("unvalidated", html)
+
     def test_dashboard_bootstraps_from_recent_snapshot(self):
         html = self.get("/")[2].decode()
         self.assertIn("async function bootstrap()", html)

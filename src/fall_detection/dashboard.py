@@ -164,7 +164,7 @@ header{display:flex;align-items:center;justify-content:space-between;gap:24px;fl
 h1{font-size:clamp(1.5rem,3vw,2.4rem);letter-spacing:-.04em;margin:4px 0}
 p{color:#9eabc3;line-height:1.55}small{color:#9eabc3}.badge{background:#193a33;color:#91f0c9;border:1px solid #286c58;border-radius:99px;padding:7px 14px}
 .notice{border:1px solid #4b3d20;background:#292418;border-radius:14px;padding:14px 18px;color:#f5d98e;margin:24px 0}
-.grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin:24px 0}
+.grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:14px;margin:24px 0}
 .card{border:1px solid #303b50;border-radius:16px;background:#192236;padding:20px;min-width:0}
 .card .value{font-size:2rem;font-weight:750;margin-top:12px;overflow-wrap:anywhere}
 .card .label{font-size:.85rem;color:#a7b6ce}
@@ -185,6 +185,7 @@ th{color:#9eabc3;font-weight:500}td{font-variant-numeric:tabular-nums}
 <div class="card"><div class="label">Latest reported state</div><div class="value" id="state">—</div></div>
 <div class="card"><div class="label">Tracked people (latest frame)</div><div class="value" id="people">—</div></div>
 <div class="card"><div class="label">Visible alerts (latest frame)</div><div class="value" id="alerts">—</div></div>
+<div class="card"><div class="label">Local log freshness</div><div class="value" id="freshness">—</div></div>
 </div>
 <section><h2>Tracked people — latest frame (unvalidated)</h2><div class="table-wrap"><table><thead><tr><th>Track</th><th>Research state</th><th>Observed</th><th>Window ready</th><th>Reason</th></tr></thead><tbody id="person-rows"></tbody></table></div></section>
 <section><h2>Recent events</h2><div class="table-wrap"><table><thead><tr><th>Frame</th><th>Source time</th><th>State</th><th>Reason</th><th>People</th><th>Processing</th></tr></thead><tbody id="rows"></tbody></table></div></section>
@@ -218,6 +219,14 @@ function addFrame(event){
   cell(row,typeof event.processing_ms==='number'?event.processing_ms.toFixed(1)+' ms':'—');
   $('rows').prepend(row);while($('rows').children.length>30){$('rows').lastChild.remove();}
 }
+async function refreshHealth(){
+  const response=await fetch('/api/health',{cache:'no-store'});
+  if(!response.ok)throw new Error('HTTP '+response.status);
+  const health=await response.json();
+  const status=health.stream_status;
+  $('freshness').textContent=status==='active'?'Recent':status==='idle'?'Idle':status==='empty'?'No frames':status==='missing'?'No log':'Unavailable';
+  $('connection').textContent=status==='active'?'Recent local updates':status==='idle'?'Log idle (no recent updates)':status==='empty'?'Waiting for frames':'Waiting for log';
+}
 async function poll(){
   if(busy)return;busy=true;
   try{
@@ -227,8 +236,8 @@ async function poll(){
     if(payload.reset){frames=0;$('frames').textContent='0';$('state').textContent='—';$('people').textContent='—';$('alerts').textContent='—';$('rows').replaceChildren();$('person-rows').replaceChildren();}
     cursor=payload.next_cursor;
     for(const event of payload.events){if(event.event==='frame')addFrame(event);}
-    $('connection').textContent=payload.source_exists?'Reading local log':'Waiting for log';
-  }catch(err){$('connection').textContent='Connection unavailable';}
+    await refreshHealth();
+  }catch(err){$('connection').textContent='Connection unavailable';$('freshness').textContent='Unavailable';}
   finally{busy=false;}
 }
 async function bootstrap(){
