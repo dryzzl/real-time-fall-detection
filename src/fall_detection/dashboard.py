@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import time
 from math import isfinite
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
@@ -247,6 +248,57 @@ bootstrap();
 </body></html>'''
 
 
+def stream_health(path: Path, *, now_seconds: float | None = None) -> dict:
+    """Bounded, metadata-only log freshness and last-frame status.
+
+    File modification time indicates producer activity, not capture latency or
+    model accuracy. Snapshot frames are a recent-window sample, not totals.
+    """
+    if not isinstance(path, Path):
+        raise DashboardError("path must be a Path")
+    if now_seconds is None:
+        now_seconds = time.time()
+    if type(now_seconds) not in (float, int) or not isfinite(now_seconds) or now_seconds < 0:
+        raise DashboardError("now_seconds must be finite and nonnegative")
+    snapshot = read_recent_events(path, _sanitize_record, limit=MAX_EVENTS)
+    result = {
+        "log_exists": False,
+        "stream_status": "missing",
+        "log_age_seconds": None,
+        "frames_in_window": 0,
+        "last_frame_index": None,
+        "last_source_timestamp_seconds": None,
+        "tracked_person_count": None,
+        "state_source": None,
+        "window_truncated": False,
+        "fall_detection_available": False,
+        "research_only": True,
+    }
+    if not snapshot["source_exists"]:
+        return result
+    try:
+        stat = path.stat()
+    except FileNotFoundError:
+        return result  # Rotation between snapshot and stat: never report stale data as live.
+    if not path.is_file():
+        raise DashboardError("log path must refer to a regular file")
+    age = max(0.0, float(now_seconds) - stat.st_mtime)
+    recent_frames = [item for item in snapshot["events"] if item.get("event") == "frame"]
+    latest = recent_frames[-1] if recent_frames else {}
+    result.update({
+        "log_exists": True,
+        "stream_status": ("empty" if not recent_frames else "active" if age <= 10.0 else "idle"),
+        "log_age_seconds": round(age, 3),
+        "frames_in_window": len(recent_frames),
+        "last_frame_index": latest.get("frame_index"),
+        "last_source_timestamp_seconds": latest.get("timestamp_seconds"),
+        "tracked_person_count": latest.get("tracked_person_count"),
+        "state_source": latest.get("state_source"),
+        "window_truncated": snapshot["window_truncated"],
+    })
+    return result
+
+
 def create_server(log_path: Path, port: int = 8765) -> ThreadingHTTPServer:
     """Create a loopback-only HTTP server; caller controls its lifetime."""
     if not isinstance(log_path, Path):
@@ -282,7 +334,7 @@ def create_server(log_path: Path, port: int = 8765) -> ThreadingHTTPServer:
                 self.send_body(200, HTML.encode("utf-8"), "text/html; charset=utf-8")
                 return
             if parsed.path == "/api/health":
-                self.send_json(200, {"ok": True, "log_exists": log_path.is_file(), "mode": "read_only_metadata"})
+                self.send_json(200, {"ok": True, "mode": "read_only_metadata", **stream_health(log_path)})
                 return
             if parsed.path == "/api/snapshot":
                 try:

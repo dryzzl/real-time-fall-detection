@@ -1,6 +1,7 @@
 """Standard-library regression tests for the local JSONL dashboard."""
 
 import json
+import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from threading import Thread
@@ -9,7 +10,7 @@ from urllib.error import HTTPError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
-from fall_detection.dashboard import DashboardError, create_server, read_events
+from fall_detection.dashboard import DashboardError, create_server, read_events, stream_health
 
 
 class DashboardReaderTests(unittest.TestCase):
@@ -140,6 +141,33 @@ class DashboardReaderTests(unittest.TestCase):
         self.assertEqual(read_events(self.log)["events"][0]["frame_index"], 9)
 
 
+    def test_stream_health_reports_freshness_without_claiming_accuracy(self):
+        self.write({"event": "frame", "frame_index": 3, "timestamp_seconds": 0.6,
+                    "tracked_person_count": 2, "state_source": "heuristic_baseline_unvalidated",
+                    "image_base64": "PRIVATE"})
+        self.write({"event": "summary", "frames_processed": 4})
+        fixed = 2_000_000_000.0
+        os.utime(self.log, (fixed - 20, fixed - 20))
+        idle = stream_health(self.log, now_seconds=fixed)
+        self.assertEqual(idle["stream_status"], "idle")
+        self.assertEqual(idle["frames_in_window"], 1)
+        self.assertEqual(idle["last_frame_index"], 3)
+        self.assertEqual(idle["tracked_person_count"], 2)
+        self.assertEqual(idle["log_age_seconds"], 20)
+        self.assertFalse(idle["fall_detection_available"])
+        self.assertTrue(idle["research_only"])
+        self.assertNotIn("PRIVATE", json.dumps(idle))
+        os.utime(self.log, (fixed - 1, fixed - 1))
+        self.assertEqual(stream_health(self.log, now_seconds=fixed)["stream_status"], "active")
+
+    def test_stream_health_missing_empty_and_invalid_clock(self):
+        self.assertEqual(stream_health(self.log)["stream_status"], "missing")
+        self.log.touch()
+        self.assertEqual(stream_health(self.log)["stream_status"], "empty")
+        for invalid in (-1, float("nan"), float("inf"), True):
+            with self.subTest(invalid=invalid), self.assertRaises(DashboardError):
+                stream_health(self.log, now_seconds=invalid)
+
 class DashboardHttpTests(unittest.TestCase):
     def setUp(self):
         self.tmp = TemporaryDirectory()
@@ -163,6 +191,21 @@ class DashboardHttpTests(unittest.TestCase):
         self.assertIn(b"Fall Detection Monitor", body)
         self.assertIn("frame-ancestors 'none'", headers["Content-Security-Policy"])
         self.assertEqual(json.loads(self.get("/api/health")[2])["mode"], "read_only_metadata")
+
+    def test_health_endpoint_exposes_bounded_live_status(self):
+        status, _, body = self.get("/api/health")
+        self.assertEqual(status, 200)
+        health = json.loads(body)
+        self.assertTrue(health["ok"])
+        self.assertTrue(health["log_exists"])
+        self.assertEqual(health["last_frame_index"], 0)
+        self.assertEqual(health["frames_in_window"], 1)
+        self.assertTrue(health["research_only"])
+        self.assertFalse(health["fall_detection_available"])
+        self.log.unlink()
+        missing = json.loads(self.get("/api/health")[2])
+        self.assertEqual(missing["stream_status"], "missing")
+        self.assertFalse(missing["log_exists"])
 
     def test_event_api_and_no_raw_frame_data(self):
         status, _, body = self.get("/api/events?cursor=0&limit=10")
