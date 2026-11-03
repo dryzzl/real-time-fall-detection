@@ -122,7 +122,7 @@ class LiveDashboardEndToEndTests(unittest.TestCase):
         manager = AlertManager(AlertConfig(fallen_persistence_seconds=0.4))
         with self.path.open("w", encoding="utf-8") as stream:
             def emit(record):
-                stream.write(json.dumps(record, allow_nan=False) + "\\n")
+                stream.write(json.dumps(record, allow_nan=False) + "\n")
                 stream.flush()
 
             run_live_pipeline(
