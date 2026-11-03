@@ -8,6 +8,7 @@ from collections.abc import Callable, Iterable
 import time
 from typing import Protocol
 
+from .alerts import AlertManager, AlertStatus
 from .contracts import FallState, FramePacket
 from .features import FeatureConfig, PoseTrackingFeatureStage, TemporalFeatureBank, TemporalFeatureWindow
 from .pipeline import RunSummary
@@ -29,12 +30,18 @@ def run_live_pipeline(
     feature_config: FeatureConfig | None = None,
     state_config: StateConfig | None = None,
     temporal_classifier: OnnxTemporalClassifier | None = None,
+    alert_manager: AlertManager | None = None,
     on_frame: Callable[[FramePacket, tuple[StateDecision, ...]], bool] | None = None,
     on_visual_frame: Callable[[FramePacket, tuple[TemporalFeatureWindow, ...], tuple[StateDecision, ...]], bool] | None = None,
     clock: Callable[[], float] = time.perf_counter,
     on_timing: Callable[[dict[str, float]], None] | None = None,
 ) -> RunSummary:
-    """Emit bounded per-person pose/temporal decisions, never raw pixels."""
+    """Emit per-person decisions and optional local-only research alert snapshots.
+
+    Alerts are unvalidated software-state demonstrations, never emergency actions.
+    """
+    if alert_manager is not None and not isinstance(alert_manager, AlertManager):
+        raise ValueError("alert_manager must be an AlertManager")
     stage = PoseTrackingFeatureStage(
         PoseTrackingStage(estimator, PersonTracker(tracker_config)),
         TemporalFeatureBank(feature_config),
@@ -75,7 +82,7 @@ def run_live_pipeline(
             }
             for window, decision in zip(windows, decisions)
         ]
-        emit({
+        record = {
             "event": "frame",
             "source": frame.source,
             "frame_index": frame.index,
@@ -92,7 +99,27 @@ def run_live_pipeline(
             "fall_detection_available": False,
             "tracked_person_count": len(people),
             "people": people,
-        })
+        }
+        if alert_manager is not None:
+            # Validate classifier outputs before updating any alert state. Active
+            # alerts remain latched even when a track temporarily disappears.
+            for decision in decisions:
+                alert_manager.update(decision, frame.timestamp_seconds)
+            record["alerts"] = [
+                {
+                    "track_id": snapshot.track_id,
+                    "status": snapshot.status.value,
+                    "observed_state": snapshot.observed_state.value,
+                    "reason": snapshot.reason,
+                    "alert_id": snapshot.alert_id,
+                }
+                for snapshot in alert_manager.snapshots()
+                if snapshot.status in (
+                    AlertStatus.PENDING, AlertStatus.ACTIVE, AlertStatus.ACKNOWLEDGED
+                )
+            ]
+            record["alerts_research_only"] = True
+        emit(record)
         if on_timing is not None:
             emit_done = clock()
             on_timing({
