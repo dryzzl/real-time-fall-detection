@@ -60,3 +60,23 @@ The benchmark uses entirely synthetic JSONL events and measures reader throughpu
 ## Safety limitations
 
 All state predictions remain research-only until a trained and independently evaluated temporal model is available. This dashboard is not a medical or emergency notification system. Do not run it on an untrusted network.
+
+## Optional research alert-state demonstration
+
+The live runner can now attach **local, unvalidated** per-track persistence
+snapshots to each JSONL frame. This is an opt-in software lifecycle demo; it
+**does not** contact emergency services, notify caregivers, or establish that a
+fall occurred. The default runner does not generate alert snapshots.
+
+```bash
+fall-detection-live --video path/to/authorized.mp4 --model models/yolo11n-pose.onnx \\
+  --research-alerts --alert-config configs/alerts.toml \\
+  --output outputs/research-alerts.jsonl
+fall-detection-dashboard --log outputs/research-alerts.jsonl --port 8765
+```
+
+The output includes an `alerts_research_only: true` marker and only pending,
+active, or acknowledged alert snapshots. An active research alert remains
+latched when the observed state changes or a tracked person disappears. The
+underlying state estimates are not validated, so treat every alert as an
+experimental UI state, not a safety-critical detection.
