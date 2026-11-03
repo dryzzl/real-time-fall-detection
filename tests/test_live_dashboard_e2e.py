@@ -102,6 +102,51 @@ class LiveDashboardEndToEndTests(unittest.TestCase):
         self.assertEqual([e["frame_index"] for e in delta["events"] if e["event"] == "frame"], [4, 5])
         self.assertEqual(len([e for e in delta["events"] if e["event"] == "summary"]), 1)
 
+    def test_opt_in_research_alerts_propagate_to_http_without_private_data(self):
+        from fall_detection.alerts import AlertConfig, AlertManager
+        from fall_detection.contracts import FallState
+        from fall_detection.state import StateDecision, StateEvidence
+
+        class SyntheticStateScript:
+            def classify_many(self, windows):
+                return tuple(
+                    StateDecision(
+                        window.track_id, window.latest.frame_index,
+                        FallState.FALLEN if window.latest.observed else FallState.UNKNOWN,
+                        "synthetic_state_not_validated",
+                        StateEvidence(3, 1.0, 1.5, 0.0),
+                    )
+                    for window in windows
+                )
+
+        manager = AlertManager(AlertConfig(fallen_persistence_seconds=0.4))
+        with self.path.open("w", encoding="utf-8") as stream:
+            def emit(record):
+                stream.write(json.dumps(record, allow_nan=False) + "\\n")
+                stream.flush()
+
+            run_live_pipeline(
+                frames(0, 7), emit, estimator=SyntheticEstimator(),
+                feature_config=FeatureConfig(window_size=5, min_observed_samples=3),
+                temporal_classifier=SyntheticStateScript(),
+                alert_manager=manager,
+            )
+        base = self.start_server()
+        snapshot = self.get(base, "/api/snapshot?limit=20")
+        records = [record for record in snapshot["events"] if record["event"] == "frame"]
+        self.assertEqual(len(records), 7)
+        self.assertTrue(all(record["alerts_research_only"] for record in records))
+        self.assertTrue(all(not record["fall_detection_available"] for record in records))
+        self.assertEqual(records[-1]["tracked_person_count"], 2)
+        self.assertEqual({alert["status"] for alert in records[-1]["alerts"]}, {"active"})
+        self.assertEqual(len(records[-1]["alerts"]), 2)
+        self.assertEqual({alert["track_id"] for alert in records[-1]["alerts"]}, {1, 2})
+        self.assertTrue(all(alert["alert_id"].startswith("alert-")
+                            for alert in records[-1]["alerts"]))
+        encoded = json.dumps(snapshot)
+        for private in ("bgr", "keypoints", "image_base64", "evidence", "color_bgr"):
+            self.assertNotIn(private, encoded)
+
     def test_http_recovery_after_live_log_is_removed(self):
         self.write_live(0, 2)
         base = self.start_server()

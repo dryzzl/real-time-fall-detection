@@ -24,7 +24,7 @@ FRAME_FIELDS = (
     "event", "source", "frame_index", "timestamp_seconds", "timestamp_basis",
     "width", "height", "state", "confidence", "reason", "mode",
     "trained_temporal_model_available", "fall_detection_available", "processing_ms",
-    "state_source", "tracked_person_count", "synthetic",
+    "state_source", "tracked_person_count", "synthetic", "alerts_research_only",
 )
 SUMMARY_FIELDS = (
     "event", "frames_processed", "source_duration_seconds", "elapsed_seconds",
@@ -188,6 +188,7 @@ th{color:#9eabc3;font-weight:500}td{font-variant-numeric:tabular-nums}
 <div class="card"><div class="label">Local log freshness</div><div class="value" id="freshness">—</div></div>
 </div>
 <section><h2>Tracked people — latest frame (unvalidated)</h2><div class="table-wrap"><table><thead><tr><th>Track</th><th>Research state</th><th>Observed</th><th>Window ready</th><th>Reason</th></tr></thead><tbody id="person-rows"></tbody></table></div></section>
+<section><h2>Research alert states — NOT emergency notifications</h2><div class="table-wrap"><table><thead><tr><th>Track</th><th>Local status</th><th>Observed state</th><th>Alert ID</th></tr></thead><tbody id="alert-rows"></tbody></table></div></section>
 <section><h2>Recent events</h2><div class="table-wrap"><table><thead><tr><th>Frame</th><th>Source time</th><th>State</th><th>Reason</th><th>People</th><th>Processing</th></tr></thead><tbody id="rows"></tbody></table></div></section>
 <footer><small>Runs on 127.0.0.1 only. Video frames and model weights are not served. Refreshing resets this browser's counters; no data is deleted.</small></footer>
 <script>
@@ -209,7 +210,17 @@ function addFrame(event){
     cell(pr,person.window_ready===true?'yes':person.window_ready===false?'no':'—');
     cell(pr,person.reason??'—');personRows.appendChild(pr);
   }
-  $('alerts').textContent=Array.isArray(event.alerts)?event.alerts.length:'—';
+  const alertItems=Array.isArray(event.alerts)?event.alerts:[];
+  $('alerts').textContent=Array.isArray(event.alerts)?alertItems.length:'—';
+  const alertRows=$('alert-rows');alertRows.replaceChildren();
+  for(const alert of alertItems){
+    const ar=document.createElement('tr');
+    cell(ar,alert.track_id??'—');
+    cell(ar,alert.status??'—');
+    cell(ar,alert.observed_state??'—');
+    cell(ar,alert.alert_id??'pending');
+    alertRows.appendChild(ar);
+  }
   const row=document.createElement('tr');
   cell(row,event.frame_index??'—');
   cell(row,typeof event.timestamp_seconds==='number'?event.timestamp_seconds.toFixed(2)+'s':'—');
@@ -233,7 +244,7 @@ async function poll(){
     const res=await fetch('/api/events?cursor='+encodeURIComponent(cursor)+'&limit=200',{cache:'no-store'});
     if(!res.ok)throw new Error('HTTP '+res.status);
     const payload=await res.json();
-    if(payload.reset){frames=0;$('frames').textContent='0';$('state').textContent='—';$('people').textContent='—';$('alerts').textContent='—';$('rows').replaceChildren();$('person-rows').replaceChildren();}
+    if(payload.reset){frames=0;$('frames').textContent='0';$('state').textContent='—';$('people').textContent='—';$('alerts').textContent='—';$('rows').replaceChildren();$('person-rows').replaceChildren();$('alert-rows').replaceChildren();}
     cursor=payload.next_cursor;
     for(const event of payload.events){if(event.event==='frame')addFrame(event);}
     await refreshHealth();

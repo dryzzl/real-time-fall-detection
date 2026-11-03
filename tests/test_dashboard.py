@@ -279,6 +279,15 @@ class DashboardHttpTests(unittest.TestCase):
         self.assertIn("Experimental software", html)
         self.assertIn("unvalidated", html)
 
+    def test_research_alerts_render_as_text_only_not_emergency_notifications(self):
+        html = self.get("/")[2].decode()
+        self.assertIn('id="alert-rows"', html)
+        self.assertIn("Research alert states", html)
+        self.assertIn("NOT emergency notifications", html)
+        self.assertIn("alertRows.replaceChildren()", html)
+        self.assertIn("cell(ar,alert.status", html)
+        self.assertIn("td.textContent=String(value)", html)
+
     def test_dashboard_bootstraps_from_recent_snapshot(self):
         html = self.get("/")[2].decode()
         self.assertIn("async function bootstrap()", html)
