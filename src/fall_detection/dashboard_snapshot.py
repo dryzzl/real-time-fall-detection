@@ -70,7 +70,7 @@ def read_recent_events(
         lines = lines[1:]  # The first physical line began before our window.
 
     events: list[dict] = []
-    for line in lines[-limit:]:
+    # Count successfully sanitized events, not physical lines: malformed tail\n    # records must not hide earlier valid dashboard observations.\n    for line in reversed(lines):
         if not line or len(line) > MAX_LINE_BYTES:
             continue
         try:
@@ -80,9 +80,9 @@ def read_recent_events(
         if isinstance(record, dict):
             safe = sanitize(record)
             if safe is not None:
-                events.append(safe)
+                events.append(safe)\n                if len(events) == limit:\n                    break
 
-    # If no complete newline was found, retain the starting offset for retry.
+    events.reverse()\n\n    # If no complete newline was found, retain the starting offset for retry.
     next_offset = start + last_newline + 1 if last_newline >= 0 else start
     return {
         "events": events,

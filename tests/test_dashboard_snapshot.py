@@ -71,6 +71,23 @@ class DashboardSnapshotTests(unittest.TestCase):
             stream.write(b"\n")
         self.assertEqual(read_events(self.path, result["next_cursor"])["events"][0]["frame_index"], 4)
 
+    def test_limit_counts_valid_sanitized_events(self):
+        self.write({"event": "frame", "frame_index": 1},
+                   {"event": "frame", "frame_index": 2},
+                   {"event": "frame", "frame_index": 3})
+        with self.path.open("ab") as stream:
+            stream.write(b"malformed-json\\n")
+        self.write({"event": "frame", "frame_index": 4})
+        result = self.recent(limit=3)
+        self.assertEqual([event["frame_index"] for event in result["events"]], [2, 3, 4])
+        self.assertEqual(read_events(self.path, result["next_cursor"])["events"], [])
+
+    def test_all_malformed_tail_yields_no_events(self):
+        self.path.write_bytes(b"invalid\\n" * 5)
+        result = self.recent(limit=2)
+        self.assertEqual(result["events"], [])
+        self.assertTrue(result["source_exists"])
+
     def test_invalid_arguments(self):
         for limit in (0, 201, True):
             with self.subTest(limit=limit), self.assertRaises(ValueError):
