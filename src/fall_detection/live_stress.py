@@ -134,10 +134,10 @@ def run_live_stress(
             tracemalloc.stop()
 
     peak_mib = peak_bytes / (1024 * 1024)
-    checks = {
+    expected_missing_observations = sum(index % 19 in (8, 9) for index in range(frames))\n    checks = {
         "all_frames_processed": records == frames == summary.frames_processed,
         "ordered_complete_records": malformed_records == 0,
-        "stable_person_ids": unexpected_track_ids == 0,
+        "stable_person_ids": unexpected_track_ids == 0,\n        "occlusion_accounting_exact": missing_observations == expected_missing_observations,
         "bounded_temporal_windows": max_window_samples <= feature_config.window_size,
         "no_unverified_fall_predictions": unsupported_predictions == 0,
         "no_raw_pose_or_pixel_data": raw_data_leaks == 0,
@@ -157,7 +157,7 @@ def run_live_stress(
         "frames_requested": frames,
         "frames_processed": summary.frames_processed,
         "people": people,
-        "missing_observations": missing_observations,
+        "missing_observations": missing_observations,\n        "expected_missing_observations": expected_missing_observations,
         "max_window_samples": max_window_samples,
         "bytes_streamed": frames * width * height * 3,
         "elapsed_seconds": round(summary.elapsed_seconds, 6),

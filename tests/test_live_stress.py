@@ -29,6 +29,14 @@ class LiveStressTests(unittest.TestCase):
         self.assertIsNotNone(profile["latency_ms"]["total_ms"])
         self.assertFalse(profile["camera_to_alert_latency_measured"])
 
+    def test_occlusion_count_is_exact_across_cycles(self):
+        for frames, expected in ((8, 0), (9, 1), (10, 2), (27, 2), (29, 4), (48, 6)):
+            with self.subTest(frames=frames):
+                report = run_live_stress(frames=frames, people=3, width=96, height=96)
+                self.assertEqual(report["expected_missing_observations"], expected)
+                self.assertEqual(report["missing_observations"], expected)
+                self.assertTrue(report["checks"]["occlusion_accounting_exact"])
+
     def test_single_frame_is_valid_without_occlusion(self):
         report = run_live_stress(frames=1, people=1, width=48, height=48)
         self.assertTrue(report["passed"], report["checks"])
