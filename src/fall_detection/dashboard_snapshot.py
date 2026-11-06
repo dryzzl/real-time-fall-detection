@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 from pathlib import Path
 from typing import Callable
 
@@ -51,7 +52,7 @@ def read_recent_events(
 
     with stream:
         stat = os.fstat(stream.fileno())
-        if not os.path.isfile(path):
+        if not stat.S_ISREG(stat.st_mode):
             raise ValueError("log path must refer to a regular file")
         size = stat.st_size
         start = max(0, size - max_bytes)
@@ -82,6 +83,8 @@ def read_recent_events(
         if isinstance(record, dict):
             safe = sanitize(record)
             if safe is not None:
+                if not isinstance(safe, dict):
+                    raise ValueError("snapshot sanitizer must return a dict or None")
                 events.append(safe)
                 if len(events) == limit:
                     break
