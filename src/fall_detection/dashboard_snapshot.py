@@ -51,10 +51,10 @@ def read_recent_events(
         return missing
 
     with stream:
-        stat = os.fstat(stream.fileno())
-        if not stat.S_ISREG(stat.st_mode):
+        file_stat = os.fstat(stream.fileno())
+        if not stat.S_ISREG(file_stat.st_mode):
             raise ValueError("log path must refer to a regular file")
-        size = stat.st_size
+        size = file_stat.st_size
         start = max(0, size - max_bytes)
         preceding = b"\n"
         if start:
@@ -63,7 +63,7 @@ def read_recent_events(
         stream.seek(start)
         data = stream.read(size - start)
 
-    identity = f"{stat.st_dev}-{stat.st_ino}"
+    identity = f"{file_stat.st_dev}-{file_stat.st_ino}"
     last_newline = data.rfind(b"\n")
     complete = data[:last_newline + 1] if last_newline >= 0 else b""
     lines = complete.split(b"\n")[:-1]
