@@ -88,6 +88,20 @@ class DashboardSnapshotTests(unittest.TestCase):
         self.assertEqual(result["events"], [])
         self.assertTrue(result["source_exists"])
 
+    def test_existing_regular_file_uses_descriptor_metadata(self):
+        """Regression: fstat result must not shadow the stat module."""
+        self.write({"event": "frame", "frame_index": 17})
+        snapshot = self.recent()
+        self.assertTrue(snapshot["source_exists"])
+        self.assertEqual(snapshot["events"][0]["frame_index"], 17)
+        identity, offset = snapshot["next_cursor"].split(":")
+        self.assertEqual(len(identity.split("-")), 2)
+        self.assertEqual(int(offset), self.path.stat().st_size)
+
+    def test_directory_is_rejected_as_non_regular_source(self):
+        with self.assertRaises((ValueError, IsADirectoryError)):
+            read_recent_events(Path(self.temp.name), _sanitize_record)
+
     def test_invalid_arguments(self):
         for limit in (0, 201, True):
             with self.subTest(limit=limit), self.assertRaises(ValueError):
