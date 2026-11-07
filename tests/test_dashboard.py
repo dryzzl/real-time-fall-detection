@@ -1,6 +1,7 @@
 """Standard-library regression tests for the local JSONL dashboard."""
 
 import json
+import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from threading import Thread
@@ -9,7 +10,7 @@ from urllib.error import HTTPError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
-from fall_detection.dashboard import DashboardError, create_server, read_events
+from fall_detection.dashboard import DashboardError, create_server, read_events, stream_health
 
 
 class DashboardReaderTests(unittest.TestCase):
@@ -32,6 +33,21 @@ class DashboardReaderTests(unittest.TestCase):
         second = read_events(self.log, first["next_cursor"])
         self.assertEqual([r["frame_index"] for r in second["events"]], [1])
         self.assertEqual(read_events(self.log, second["next_cursor"])["events"], [])
+
+    def test_deleted_log_resets_cursor_and_recovery_starts_fresh(self):
+        self.write({"event": "frame", "frame_index": 40, "state": "unknown"})
+        cursor = read_events(self.log)["next_cursor"]
+        self.log.unlink()
+        missing = read_events(self.log, cursor)
+        self.assertFalse(missing["source_exists"])
+        self.assertTrue(missing["reset"])
+        self.assertEqual(missing["next_cursor"], "0")
+        self.assertEqual(missing["events"], [])
+        self.assertFalse(read_events(self.log, "0")["reset"])
+        self.write({"event": "frame", "frame_index": 0, "state": "unknown"})
+        recovered = read_events(self.log, missing["next_cursor"])
+        self.assertFalse(recovered["reset"])
+        self.assertEqual([r["frame_index"] for r in recovered["events"]], [0])
 
     def test_partial_line_is_not_lost(self):
         self.log.write_bytes(b'{"event":"frame","frame_index":0}')
@@ -63,6 +79,26 @@ class DashboardReaderTests(unittest.TestCase):
         self.assertNotIn("keypoints", encoded)
         self.assertEqual(result["people"], [{"track_id": 3, "state": "unknown"}])
         self.assertEqual(result["alerts"], [{"track_id": 3, "status": "pending"}])
+
+    def test_untrusted_scalar_metadata_is_bounded_and_finite(self):
+        self.write({
+            "event": "frame", "frame_index": 7,
+            "reason": "R" * 20_000, "state": "S" * 20_000,
+            "confidence": float("nan"), "processing_ms": float("inf"),
+            "people": [{"track_id": 1, "reason": "P" * 20_000,
+                        "confidence": float("-inf")}],
+            "alerts": [{"status": "A" * 20_000}],
+        })
+        result = read_events(self.log)["events"][0]
+        self.assertEqual(result["frame_index"], 7)
+        self.assertEqual(len(result["reason"]), 512)
+        self.assertEqual(len(result["state"]), 512)
+        self.assertEqual(len(result["people"][0]["reason"]), 512)
+        self.assertEqual(len(result["alerts"][0]["status"]), 512)
+        self.assertNotIn("confidence", result)
+        self.assertNotIn("processing_ms", result)
+        self.assertNotIn("confidence", result["people"][0])
+        self.assertLess(len(json.dumps(result)), 2500)
 
     def test_live_per_person_heuristic_fields_are_retained_without_pixels(self):
         self.write({
@@ -105,6 +141,33 @@ class DashboardReaderTests(unittest.TestCase):
         self.assertEqual(read_events(self.log)["events"][0]["frame_index"], 9)
 
 
+    def test_stream_health_reports_freshness_without_claiming_accuracy(self):
+        self.write({"event": "frame", "frame_index": 3, "timestamp_seconds": 0.6,
+                    "tracked_person_count": 2, "state_source": "heuristic_baseline_unvalidated",
+                    "image_base64": "PRIVATE"})
+        self.write({"event": "summary", "frames_processed": 4})
+        fixed = 2_000_000_000.0
+        os.utime(self.log, (fixed - 20, fixed - 20))
+        idle = stream_health(self.log, now_seconds=fixed)
+        self.assertEqual(idle["stream_status"], "idle")
+        self.assertEqual(idle["frames_in_window"], 1)
+        self.assertEqual(idle["last_frame_index"], 3)
+        self.assertEqual(idle["tracked_person_count"], 2)
+        self.assertEqual(idle["log_age_seconds"], 20)
+        self.assertFalse(idle["fall_detection_available"])
+        self.assertTrue(idle["research_only"])
+        self.assertNotIn("PRIVATE", json.dumps(idle))
+        os.utime(self.log, (fixed - 1, fixed - 1))
+        self.assertEqual(stream_health(self.log, now_seconds=fixed)["stream_status"], "active")
+
+    def test_stream_health_missing_empty_and_invalid_clock(self):
+        self.assertEqual(stream_health(self.log)["stream_status"], "missing")
+        self.log.touch()
+        self.assertEqual(stream_health(self.log)["stream_status"], "empty")
+        for invalid in (-1, float("nan"), float("inf"), True):
+            with self.subTest(invalid=invalid), self.assertRaises(DashboardError):
+                stream_health(self.log, now_seconds=invalid)
+
 class DashboardHttpTests(unittest.TestCase):
     def setUp(self):
         self.tmp = TemporaryDirectory()
@@ -129,6 +192,21 @@ class DashboardHttpTests(unittest.TestCase):
         self.assertIn("frame-ancestors 'none'", headers["Content-Security-Policy"])
         self.assertEqual(json.loads(self.get("/api/health")[2])["mode"], "read_only_metadata")
 
+    def test_health_endpoint_exposes_bounded_live_status(self):
+        status, _, body = self.get("/api/health")
+        self.assertEqual(status, 200)
+        health = json.loads(body)
+        self.assertTrue(health["ok"])
+        self.assertTrue(health["log_exists"])
+        self.assertEqual(health["last_frame_index"], 0)
+        self.assertEqual(health["frames_in_window"], 1)
+        self.assertTrue(health["research_only"])
+        self.assertFalse(health["fall_detection_available"])
+        self.log.unlink()
+        missing = json.loads(self.get("/api/health")[2])
+        self.assertEqual(missing["stream_status"], "missing")
+        self.assertFalse(missing["log_exists"])
+
     def test_event_api_and_no_raw_frame_data(self):
         status, _, body = self.get("/api/events?cursor=0&limit=10")
         self.assertEqual(status, 200)
@@ -136,6 +214,84 @@ class DashboardHttpTests(unittest.TestCase):
         self.assertEqual(result["events"][0]["state"], "unknown")
         self.assertNotIn("bgr", body.decode())
         self.assertEqual(json.loads(self.get("/api/events?cursor=" + quote(result["next_cursor"]))[2])["events"], [])
+
+    def test_http_log_deletion_invalidates_stale_browser_state(self):
+        first = json.loads(self.get("/api/events")[2])
+        self.log.unlink()
+        missing = json.loads(self.get("/api/events?cursor=" + quote(first["next_cursor"]))[2])
+        self.assertEqual(missing["events"], [])
+        self.assertFalse(missing["source_exists"])
+        self.assertTrue(missing["reset"])
+        self.assertEqual(missing["next_cursor"], "0")
+        self.log.write_text('{"event":"frame","frame_index":9}\n')
+        fresh = json.loads(self.get("/api/events?cursor=0")[2])
+        self.assertEqual(fresh["events"][0]["frame_index"], 9)
+
+    def test_snapshot_returns_recent_events_and_hands_off_cursor(self):
+        with self.log.open("a", encoding="utf-8") as stream:
+            for index in range(1, 7):
+                stream.write(json.dumps({"event": "frame", "frame_index": index,
+                                         "raw_frame": "PRIVATE"}) + "\n")
+        status, _, body = self.get("/api/snapshot?limit=2")
+        self.assertEqual(status, 200)
+        snapshot = json.loads(body)
+        self.assertEqual([e["frame_index"] for e in snapshot["events"]], [5, 6])
+        self.assertNotIn("PRIVATE", body.decode())
+        with self.log.open("a", encoding="utf-8") as stream:
+            stream.write('{"event":"frame","frame_index":7}\n')
+        cursor = quote(snapshot["next_cursor"])
+        next_events = json.loads(self.get("/api/events?cursor=" + cursor)[2])
+        self.assertEqual([e["frame_index"] for e in next_events["events"]], [7])
+
+    def test_snapshot_preserves_partial_trailing_record(self):
+        with self.log.open("ab") as stream:
+            stream.write(b'{"event":"frame","frame_index":8}')
+        snapshot = json.loads(self.get("/api/snapshot")[2])
+        self.assertTrue(snapshot["partial_trailing_line"])
+        self.assertEqual(snapshot["events"][0]["frame_index"], 0)
+        with self.log.open("ab") as stream:
+            stream.write(b"\n")
+        cursor = quote(snapshot["next_cursor"])
+        result = json.loads(self.get("/api/events?cursor=" + cursor)[2])
+        self.assertEqual(result["events"][0]["frame_index"], 8)
+
+    def test_snapshot_rejects_invalid_queries(self):
+        for path in ("/api/snapshot?limit=0", "/api/snapshot?limit=201",
+                     "/api/snapshot?limit=1&limit=2", "/api/snapshot?cursor=0"):
+            with self.subTest(path=path), self.assertRaises(HTTPError) as context:
+                self.get(path)
+            self.assertEqual(context.exception.code, 400)
+
+    def test_dashboard_labels_model_and_heuristic_as_unvalidated(self):
+        html = self.get("/")[2].decode()
+        self.assertIn("<th>Research state</th>", html)
+        self.assertIn("onnx_temporal_unvalidated", html)
+        self.assertIn("heuristic_baseline_unvalidated", html)
+        self.assertIn("ONNX temporal", html)
+        self.assertIn("unvalidated", html)
+
+    def test_dashboard_displays_log_freshness_separately_from_detection_state(self):
+        html = self.get("/")[2].decode()
+        self.assertIn('id="freshness"', html)
+        self.assertIn("async function refreshHealth()", html)
+        self.assertIn("fetch('/api/health'", html)
+        self.assertIn("Log idle (no recent updates)", html)
+        self.assertIn("Experimental software", html)
+        self.assertIn("unvalidated", html)
+
+    def test_research_alerts_render_as_text_only_not_emergency_notifications(self):
+        html = self.get("/")[2].decode()
+        self.assertIn('id="alert-rows"', html)
+        self.assertIn("Research alert states", html)
+        self.assertIn("NOT emergency notifications", html)
+        self.assertIn("alertRows.replaceChildren()", html)
+        self.assertIn("cell(ar,alert.status", html)
+        self.assertIn("td.textContent=String(value)", html)
+
+    def test_dashboard_bootstraps_from_recent_snapshot(self):
+        html = self.get("/")[2].decode()
+        self.assertIn("async function bootstrap()", html)
+        self.assertIn("/api/snapshot?limit=100", html)
 
     def test_rejects_dns_rebinding_host(self):
         request = Request(self.base + "/api/events", headers={"Host": "attacker.example"})

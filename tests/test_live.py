@@ -90,5 +90,65 @@ class LiveIntegrationTests(unittest.TestCase):
         self.assertEqual(len(events), 3)
 
 
+    def test_classifier_contract_rejects_dropped_reordered_and_stale_tracks(self):
+        from fall_detection.contracts import FallState
+        from fall_detection.state import StateDecision, StateEvidence
+
+        def decision(window, *, track_id=None, frame_index=None):
+            return StateDecision(
+                window.track_id if track_id is None else track_id,
+                window.latest.frame_index if frame_index is None else frame_index,
+                FallState.UNKNOWN, "test", StateEvidence(0, None, None, None),
+            )
+
+        class FaultyClassifier:
+            def __init__(self, fault):
+                self.fault = fault
+
+            def classify_many(self, windows):
+                valid = tuple(decision(window) for window in windows)
+                if self.fault == "drop":
+                    return valid[:-1]
+                if self.fault == "reorder":
+                    return tuple(reversed(valid))
+                if self.fault == "stale":
+                    return (decision(windows[0], frame_index=999), *valid[1:])
+                if self.fault == "wrong_type":
+                    return ("invalid", *valid[1:])
+                return valid
+
+        for fault in ("drop", "reorder", "stale", "wrong_type"):
+            with self.subTest(fault=fault):
+                records = []
+                with self.assertRaisesRegex(ValueError, "classifier decisions must match"):
+                    run_live_pipeline(
+                        [frame(0)], records.append,
+                        estimator=FakeEstimator(two_people=True),
+                        temporal_classifier=FaultyClassifier(fault),
+                    )
+                self.assertEqual(records, [])
+
+    def test_classifier_contract_accepts_matching_tracks(self):
+        from fall_detection.contracts import FallState
+        from fall_detection.state import StateDecision, StateEvidence
+
+        class MatchingClassifier:
+            def classify_many(self, windows):
+                return tuple(
+                    StateDecision(w.track_id, w.latest.frame_index, FallState.UNKNOWN,
+                                  "test", StateEvidence(0, None, None, None))
+                    for w in windows
+                )
+
+        records = []
+        summary = run_live_pipeline(
+            [frame(0)], records.append,
+            estimator=FakeEstimator(two_people=True),
+            temporal_classifier=MatchingClassifier(),
+        )
+        self.assertEqual(summary.frames_processed, 1)
+        self.assertEqual(len(records[0]["people"]), 2)
+
+
 if __name__ == "__main__":
     unittest.main()

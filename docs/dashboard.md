@@ -1,6 +1,6 @@
 # Local fall-detection monitoring dashboard
 
-This read-only, loopback-only full-stack demonstration serves **metadata**, not video frames, from the JSONL produced by the existing `fall-detection` and `fall-detection-live` commands. It polls incremental events every second and displays reported states, track counts, frame counts, and recent events.
+This read-only, loopback-only full-stack demonstration serves **metadata**, not video frames, from the JSONL produced by the existing `fall-detection` and `fall-detection-live` commands. It initializes from a bounded recent-event snapshot, then polls incremental events every second and displays reported states, track counts, frame counts, and recent events. The browser's frame counter is the number of frames loaded in the current session, not the all-time total in a long log.
 
 ## Installation
 
@@ -35,12 +35,17 @@ fall-detection-live --camera 0 --model models/yolo11n-pose.onnx --output outputs
 fall-detection-dashboard --log outputs/live.jsonl --port 8765
 ```
 
-Run these commands in separate terminals. The app can show tracked people and experimental state estimates, but this does not establish fall-detection accuracy. The API never returns raw frames, model binaries, keypoints, or user-selected files. The monitor is restricted to 127.0.0.1.
+Run these commands in separate terminals. The app can show tracked people and experimental state estimates, but this does not establish fall-detection accuracy. The API never returns raw frames, model binaries, keypoints, or user-selected files. All reflected string metadata fields are capped at 512 characters and nonfinite numeric values are discarded. The monitor is restricted to 127.0.0.1.
+
+## Stream freshness and research status
+
+The browser now displays **local log freshness** separately from unvalidated research states. The `GET /api/health` endpoint reports `stream_status` (`missing`, `empty`, `active`, or `idle`), `log_age_seconds`, and a bounded recent-window last-frame summary. An `active` log only means the file was updated within ten seconds; it does **not** mean a person was detected, a fall was verified, or an alert was delivered. The browser's "Frames observed" counter remains session/window-local, not a total across the entire source file. Health metadata never includes raw video, keypoints, or model weights.
 
 ## API
 
 - `GET /` serves the dashboard.
-- `GET /api/health` checks log availability.
+- `GET /api/health` checks log availability, bounded recent frame metadata, and file modification freshness; it does not assess model accuracy.
+- `GET /api/snapshot?limit=100` reads the newest complete JSONL records from a bounded 2 MiB tail window, returning a continuation cursor and flags for truncated history or an incomplete trailing line. This avoids replaying an entire long-running log on browser refresh.
 - `GET /api/events?cursor=0&limit=100` returns at most 200 sanitized metadata records per request and a cursor. A rotated/truncated log resets the cursor.
 
 ## Tests and stress benchmarks
@@ -55,3 +60,23 @@ The benchmark uses entirely synthetic JSONL events and measures reader throughpu
 ## Safety limitations
 
 All state predictions remain research-only until a trained and independently evaluated temporal model is available. This dashboard is not a medical or emergency notification system. Do not run it on an untrusted network.
+
+## Optional research alert-state demonstration
+
+The live runner can now attach **local, unvalidated** per-track persistence
+snapshots to each JSONL frame. This is an opt-in software lifecycle demo; it
+**does not** contact emergency services, notify caregivers, or establish that a
+fall occurred. The default runner does not generate alert snapshots.
+
+```bash
+fall-detection-live --video path/to/authorized.mp4 --model models/yolo11n-pose.onnx \\
+  --research-alerts --alert-config configs/alerts.toml \\
+  --output outputs/research-alerts.jsonl
+fall-detection-dashboard --log outputs/research-alerts.jsonl --port 8765
+```
+
+The output includes an `alerts_research_only: true` marker and only pending,
+active, or acknowledged alert snapshots. An active research alert remains
+latched when the observed state changes or a tracked person disappears. The
+underlying state estimates are not validated, so treat every alert as an
+experimental UI state, not a safety-critical detection.

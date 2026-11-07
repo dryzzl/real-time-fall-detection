@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 import sys
 
+from .alerts import AlertManager, load_alert_config
 from .capture import CaptureConfig, CaptureError, open_capture
 from .features import load_feature_config
 from .live import run_live_pipeline
@@ -28,6 +29,10 @@ def main(argv: list[str] | None = None) -> int:
     source.add_argument("--video", type=Path, help="Existing local video file")
     parser.add_argument("--model", type=Path, help="Raw YOLO11-Pose ONNX export")
     parser.add_argument("--temporal-model", type=Path, help="Validated-contract temporal ONNX model (research only)")
+    parser.add_argument("--research-alerts", action="store_true",
+                        help="Opt in to unvalidated local-only alert-state metadata; NOT emergency notifications")
+    parser.add_argument("--alert-config", type=Path, default=Path("configs/alerts.toml"),
+                        help="Local research alert persistence/cooldown settings")
     parser.add_argument("--training-config", type=Path, default=Path("configs/training.toml"))
     parser.add_argument("--pose-config", type=Path, default=Path("configs/pose.toml"))
     parser.add_argument("--tracker-config", type=Path, default=Path("configs/tracker.toml"))
@@ -47,6 +52,8 @@ def main(argv: list[str] | None = None) -> int:
                 and args.output.resolve() == args.latency_report.resolve()):
             raise ValueError("--output and --latency-report must be distinct paths")
         profiler = FrameLatencyCollector() if args.latency_report is not None else None
+        alert_manager = (AlertManager(load_alert_config(args.alert_config))
+                         if args.research_alerts else None)
         capture = CaptureConfig(
             camera=args.camera, video=args.video,
             max_frames=args.max_frames, fallback_fps=args.fallback_fps,
@@ -66,7 +73,7 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError("pose and feature keypoint counts must match")
         with ExitStack() as stack:
             frames = stack.enter_context(open_capture(capture))
-            preview = stack.enter_context(LivePreview()) if args.preview else None
+            preview = stack.enter_context(LivePreview(temporal_model=temporal is not None)) if args.preview else None
             if args.output:
                 args.output.parent.mkdir(parents=True, exist_ok=True)
             stream = stack.enter_context(
@@ -81,6 +88,7 @@ def main(argv: list[str] | None = None) -> int:
                 frames, emit, estimator=pose,
                 tracker_config=tracker, feature_config=features, state_config=state,
                 temporal_classifier=temporal,
+                alert_manager=alert_manager,
                 on_visual_frame=preview.show_live if preview is not None else None,
                 on_timing=profiler.record if profiler is not None else None,
             )
