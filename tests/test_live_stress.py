@@ -37,6 +37,17 @@ class LiveStressTests(unittest.TestCase):
                 self.assertEqual(report["missing_observations"], expected)
                 self.assertTrue(report["checks"]["occlusion_accounting_exact"])
 
+    def test_maximum_supported_people_across_repeated_occlusions(self):
+        # Multiple cycles with 16 tracks catch identity swaps and missed
+        # observations that a total-only occlusion counter cannot detect.
+        report = run_live_stress(frames=48, people=16, width=160, height=160)
+        self.assertTrue(report["passed"], report["checks"])
+        self.assertEqual(report["expected_missing_observations"], 6)
+        self.assertEqual(report["missing_observations"], 6)
+        self.assertEqual(report["occlusion_frame_mismatches"], 0)
+        self.assertTrue(report["checks"]["occlusion_timing_and_identity_exact"])
+        self.assertTrue(report["checks"]["stable_person_ids"])
+
     def test_single_frame_is_valid_without_occlusion(self):
         report = run_live_stress(frames=1, people=1, width=48, height=48)
         self.assertTrue(report["passed"], report["checks"])
