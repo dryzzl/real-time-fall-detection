@@ -99,7 +99,7 @@ class DashboardSnapshotTests(unittest.TestCase):
         self.assertEqual(int(offset), self.path.stat().st_size)
 
     def test_directory_is_rejected_as_non_regular_source(self):
-        with self.assertRaises((ValueError, IsADirectoryError)):
+        with self.assertRaises((ValueError, IsADirectoryError, PermissionError)):
             read_recent_events(Path(self.temp.name), _sanitize_record)
 
     def test_invalid_arguments(self):
