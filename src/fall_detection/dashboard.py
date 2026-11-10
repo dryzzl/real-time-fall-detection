@@ -10,16 +10,21 @@ from __future__ import annotations
 import argparse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import time
+from math import isfinite
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
+from .dashboard_snapshot import read_recent_events
+
 MAX_EVENTS = 200
 MAX_LINE_BYTES = 1_000_000
+MAX_TEXT_CHARS = 512  # Bound untrusted metadata reflected in HTTP responses.
 FRAME_FIELDS = (
     "event", "source", "frame_index", "timestamp_seconds", "timestamp_basis",
     "width", "height", "state", "confidence", "reason", "mode",
     "trained_temporal_model_available", "fall_detection_available", "processing_ms",
-    "state_source", "tracked_person_count", "synthetic",
+    "state_source", "tracked_person_count", "synthetic", "alerts_research_only",
 )
 SUMMARY_FIELDS = (
     "event", "frames_processed", "source_duration_seconds", "elapsed_seconds",
@@ -33,12 +38,19 @@ ALERT_FIELDS = ("track_id", "status", "observed_state", "reason", "alert_id")
 
 
 def _safe_scalars(record: dict, fields: tuple[str, ...]) -> dict:
-    """Whitelist scalar metadata, never returning image/video blobs."""
-    return {
-        key: record[key]
-        for key in fields
-        if key in record and (record[key] is None or type(record[key]) in (str, int, float, bool))
-    }
+    """Whitelist and bound metadata; discard nonfinite numeric values."""
+    safe = {}
+    for key in fields:
+        if key not in record:
+            continue
+        value = record[key]
+        if type(value) is str:
+            safe[key] = value[:MAX_TEXT_CHARS]
+        elif value is None or type(value) in (int, bool):
+            safe[key] = value
+        elif type(value) is float and isfinite(value):
+            safe[key] = value
+    return safe
 
 
 def _sanitize_record(record: dict) -> dict | None:
@@ -79,7 +91,9 @@ def read_events(path: Path, cursor: str = "0", limit: int = 100) -> dict:
     if not isinstance(cursor, str) or len(cursor) > 100:
         raise DashboardError("invalid cursor")
     if not path.exists():
-        return {"events": [], "next_cursor": "0", "source_exists": False, "reset": False}
+        # A removed log must invalidate the browser's previous state;
+        # otherwise stale track/fall information remains visible.
+        return {"events": [], "next_cursor": "0", "source_exists": False, "reset": cursor != "0"}
     if not path.is_file():
         raise DashboardError("log path must refer to a regular file")
 
@@ -150,7 +164,7 @@ header{display:flex;align-items:center;justify-content:space-between;gap:24px;fl
 h1{font-size:clamp(1.5rem,3vw,2.4rem);letter-spacing:-.04em;margin:4px 0}
 p{color:#9eabc3;line-height:1.55}small{color:#9eabc3}.badge{background:#193a33;color:#91f0c9;border:1px solid #286c58;border-radius:99px;padding:7px 14px}
 .notice{border:1px solid #4b3d20;background:#292418;border-radius:14px;padding:14px 18px;color:#f5d98e;margin:24px 0}
-.grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin:24px 0}
+.grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:14px;margin:24px 0}
 .card{border:1px solid #303b50;border-radius:16px;background:#192236;padding:20px;min-width:0}
 .card .value{font-size:2rem;font-weight:750;margin-top:12px;overflow-wrap:anywhere}
 .card .label{font-size:.85rem;color:#a7b6ce}
@@ -171,8 +185,10 @@ th{color:#9eabc3;font-weight:500}td{font-variant-numeric:tabular-nums}
 <div class="card"><div class="label">Latest reported state</div><div class="value" id="state">—</div></div>
 <div class="card"><div class="label">Tracked people (latest frame)</div><div class="value" id="people">—</div></div>
 <div class="card"><div class="label">Visible alerts (latest frame)</div><div class="value" id="alerts">—</div></div>
+<div class="card"><div class="label">Local log freshness</div><div class="value" id="freshness">—</div></div>
 </div>
-<section><h2>Tracked people — latest frame (unvalidated)</h2><div class="table-wrap"><table><thead><tr><th>Track</th><th>Heuristic state</th><th>Observed</th><th>Window ready</th><th>Reason</th></tr></thead><tbody id="person-rows"></tbody></table></div></section>
+<section><h2>Tracked people — latest frame (unvalidated)</h2><div class="table-wrap"><table><thead><tr><th>Track</th><th>Research state</th><th>Observed</th><th>Window ready</th><th>Reason</th></tr></thead><tbody id="person-rows"></tbody></table></div></section>
+<section><h2>Research alert states — NOT emergency notifications</h2><div class="table-wrap"><table><thead><tr><th>Track</th><th>Local status</th><th>Observed state</th><th>Alert ID</th></tr></thead><tbody id="alert-rows"></tbody></table></div></section>
 <section><h2>Recent events</h2><div class="table-wrap"><table><thead><tr><th>Frame</th><th>Source time</th><th>State</th><th>Reason</th><th>People</th><th>Processing</th></tr></thead><tbody id="rows"></tbody></table></div></section>
 <footer><small>Runs on 127.0.0.1 only. Video frames and model weights are not served. Refreshing resets this browser's counters; no data is deleted.</small></footer>
 <script>
@@ -188,12 +204,23 @@ function addFrame(event){
   for(const person of (Array.isArray(event.people)?event.people:[])){
     const pr=document.createElement('tr');
     cell(pr,person.track_id??'—');
-    cell(pr,typeof person.state==='string'?person.state+' (heuristic)':'unknown');
+    const method=event.state_source==='onnx_temporal_unvalidated'?'ONNX temporal':event.state_source==='heuristic_baseline_unvalidated'?'heuristic':'unspecified';
+    cell(pr,typeof person.state==='string'?person.state+' ('+method+', unvalidated)':'unknown');
     cell(pr,person.observed===true?'yes':person.observed===false?'no':'—');
     cell(pr,person.window_ready===true?'yes':person.window_ready===false?'no':'—');
     cell(pr,person.reason??'—');personRows.appendChild(pr);
   }
-  $('alerts').textContent=Array.isArray(event.alerts)?event.alerts.length:'—';
+  const alertItems=Array.isArray(event.alerts)?event.alerts:[];
+  $('alerts').textContent=Array.isArray(event.alerts)?alertItems.length:'—';
+  const alertRows=$('alert-rows');alertRows.replaceChildren();
+  for(const alert of alertItems){
+    const ar=document.createElement('tr');
+    cell(ar,alert.track_id??'—');
+    cell(ar,alert.status??'—');
+    cell(ar,alert.observed_state??'—');
+    cell(ar,alert.alert_id??'pending');
+    alertRows.appendChild(ar);
+  }
   const row=document.createElement('tr');
   cell(row,event.frame_index??'—');
   cell(row,typeof event.timestamp_seconds==='number'?event.timestamp_seconds.toFixed(2)+'s':'—');
@@ -203,22 +230,93 @@ function addFrame(event){
   cell(row,typeof event.processing_ms==='number'?event.processing_ms.toFixed(1)+' ms':'—');
   $('rows').prepend(row);while($('rows').children.length>30){$('rows').lastChild.remove();}
 }
+async function refreshHealth(){
+  const response=await fetch('/api/health',{cache:'no-store'});
+  if(!response.ok)throw new Error('HTTP '+response.status);
+  const health=await response.json();
+  const status=health.stream_status;
+  $('freshness').textContent=status==='active'?'Recent':status==='idle'?'Idle':status==='empty'?'No frames':status==='missing'?'No log':'Unavailable';
+  $('connection').textContent=status==='active'?'Recent local updates':status==='idle'?'Log idle (no recent updates)':status==='empty'?'Waiting for frames':'Waiting for log';
+}
 async function poll(){
   if(busy)return;busy=true;
   try{
     const res=await fetch('/api/events?cursor='+encodeURIComponent(cursor)+'&limit=200',{cache:'no-store'});
     if(!res.ok)throw new Error('HTTP '+res.status);
     const payload=await res.json();
-    if(payload.reset){frames=0;$('frames').textContent='0';$('state').textContent='—';$('people').textContent='—';$('alerts').textContent='—';$('rows').replaceChildren();$('person-rows').replaceChildren();}
+    if(payload.reset){frames=0;$('frames').textContent='0';$('state').textContent='—';$('people').textContent='—';$('alerts').textContent='—';$('rows').replaceChildren();$('person-rows').replaceChildren();$('alert-rows').replaceChildren();}
+    cursor=payload.next_cursor;
+    for(const event of payload.events){if(event.event==='frame')addFrame(event);}
+    await refreshHealth();
+  }catch(err){$('connection').textContent='Connection unavailable';$('freshness').textContent='Unavailable';}
+  finally{busy=false;}
+}
+async function bootstrap(){
+  try{
+    const response=await fetch('/api/snapshot?limit=100',{cache:'no-store'});
+    if(!response.ok)throw new Error('HTTP '+response.status);
+    const payload=await response.json();
     cursor=payload.next_cursor;
     for(const event of payload.events){if(event.event==='frame')addFrame(event);}
     $('connection').textContent=payload.source_exists?'Reading local log':'Waiting for log';
-  }catch(err){$('connection').textContent='Connection unavailable';}
-  finally{busy=false;}
+  }catch(err){$('connection').textContent='Snapshot unavailable';}
+  poll();
+  setInterval(poll,1000);
 }
-poll();setInterval(poll,1000);
+bootstrap();
 </script>
 </body></html>'''
+
+
+def stream_health(path: Path, *, now_seconds: float | None = None) -> dict:
+    """Bounded, metadata-only log freshness and last-frame status.
+
+    File modification time indicates producer activity, not capture latency or
+    model accuracy. Snapshot frames are a recent-window sample, not totals.
+    """
+    if not isinstance(path, Path):
+        raise DashboardError("path must be a Path")
+    if now_seconds is None:
+        now_seconds = time.time()
+    if type(now_seconds) not in (float, int) or not isfinite(now_seconds) or now_seconds < 0:
+        raise DashboardError("now_seconds must be finite and nonnegative")
+    snapshot = read_recent_events(path, _sanitize_record, limit=MAX_EVENTS)
+    result = {
+        "log_exists": False,
+        "stream_status": "missing",
+        "log_age_seconds": None,
+        "frames_in_window": 0,
+        "last_frame_index": None,
+        "last_source_timestamp_seconds": None,
+        "tracked_person_count": None,
+        "state_source": None,
+        "window_truncated": False,
+        "fall_detection_available": False,
+        "research_only": True,
+    }
+    if not snapshot["source_exists"]:
+        return result
+    try:
+        stat = path.stat()
+    except FileNotFoundError:
+        return result  # Rotation between snapshot and stat: never report stale data as live.
+    if not path.is_file():
+        raise DashboardError("log path must refer to a regular file")
+    age = max(0.0, float(now_seconds) - stat.st_mtime)
+    recent_frames = [item for item in snapshot["events"] if item.get("event") == "frame"]
+    latest = recent_frames[-1] if recent_frames else {}
+    result.update({
+        "log_exists": True,
+        "stream_status": ("empty" if not recent_frames else "active" if age <= 10.0 else "idle"),
+        "log_age_seconds": round(age, 3),
+        "frames_in_window": len(recent_frames),
+        "last_frame_index": latest.get("frame_index"),
+        "last_source_timestamp_seconds": latest.get("timestamp_seconds"),
+        "tracked_person_count": latest.get("tracked_person_count"),
+        "state_source": latest.get("state_source"),
+        "window_truncated": snapshot["window_truncated"],
+    })
+    return result
 
 
 def create_server(log_path: Path, port: int = 8765) -> ThreadingHTTPServer:
@@ -256,7 +354,17 @@ def create_server(log_path: Path, port: int = 8765) -> ThreadingHTTPServer:
                 self.send_body(200, HTML.encode("utf-8"), "text/html; charset=utf-8")
                 return
             if parsed.path == "/api/health":
-                self.send_json(200, {"ok": True, "log_exists": log_path.is_file(), "mode": "read_only_metadata"})
+                self.send_json(200, {"ok": True, "mode": "read_only_metadata", **stream_health(log_path)})
+                return
+            if parsed.path == "/api/snapshot":
+                try:
+                    params = parse_qs(parsed.query, keep_blank_values=True)
+                    if set(params) - {"limit"} or any(len(v) != 1 for v in params.values()):
+                        raise DashboardError("unknown or repeated query parameter")
+                    limit = int(params.get("limit", ["100"])[0])
+                    self.send_json(200, read_recent_events(log_path, _sanitize_record, limit=limit))
+                except (ValueError, OSError) as exc:
+                    self.send_json(400, {"error": str(exc)})
                 return
             if parsed.path == "/api/events":
                 try:

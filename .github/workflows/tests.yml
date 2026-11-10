@@ -22,6 +22,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: python -m pip install -e ".[headless,model,test]"
+      - run: python -m compileall -q src tests scripts
       - run: python -m unittest discover -s tests -v
       - run: fall-detection status
       - run: fall-detection demo --frames 3 --output outputs/smoke.jsonl

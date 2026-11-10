@@ -19,11 +19,14 @@ def clamp(value, bound):
     return max(0, min(bound - 1, round(value)))
 
 
-def render_overlay(cv, pixels, frame, windows, decisions):
-    """Draw observed poses without serializing raw pixels or invented detections."""
+def render_overlay(cv, pixels, frame, windows, decisions, *, mode="heuristic"):
+    """Draw observed poses with an accurate, unvalidated inference-mode label."""
+    if mode not in ("heuristic", "onnx"):
+        raise ValueError("preview mode must be heuristic or onnx")
     if tuple(w.track_id for w in windows) != tuple(d.track_id for d in decisions):
         raise ValueError("preview track IDs must match state decision IDs")
-    cv.putText(pixels, "UNVALIDATED HEURISTIC POSE DEMO - NOT A FALL ALERT",
+    mode_label = "ONNX TEMPORAL" if mode == "onnx" else "HEURISTIC"
+    cv.putText(pixels, f"UNVALIDATED {mode_label} POSE DEMO - NOT A FALL ALERT",
                (8, 22), cv.FONT_HERSHEY_SIMPLEX, 0.5, (0, 220, 255), 2)
     missing = sum(not w.latest.observed for w in windows)
     cv.putText(pixels, f"Frame {frame.index} | Tracks {len(windows)} | Missing {missing}",
@@ -43,7 +46,7 @@ def render_overlay(cv, pixels, frame, windows, decisions):
         left, top = clamp(cx - bw / 2, frame.width), clamp(cy - bh / 2, frame.height)
         right, bottom = clamp(cx + bw / 2, frame.width), clamp(cy + bh / 2, frame.height)
         cv.rectangle(pixels, (left, top), (right, bottom), color, 2)
-        cv.putText(pixels, f"ID {window.track_id} {decision.state.value} (heuristic)",
+        cv.putText(pixels, f"ID {window.track_id} {decision.state.value} ({mode}, unvalidated)",
                    (left, max(58, top - 7)), cv.FONT_HERSHEY_SIMPLEX, 0.45, color, 2)
         points = {}
         for i, (coords, valid) in enumerate(zip(sample.keypoints_xy, sample.keypoint_mask)):
@@ -60,11 +63,17 @@ def render_overlay(cv, pixels, frame, windows, decisions):
 class LivePreview(Preview):
     title = "Fall Detection | Unvalidated Pose Demo | Q/Esc quits"
 
+    def __init__(self, *, temporal_model: bool = False):
+        if type(temporal_model) is not bool:
+            raise ValueError("temporal_model must be boolean")
+        self.temporal_model = temporal_model
+
     def show_live(self, frame, windows, decisions):
         pixels = self.np.frombuffer(frame.bgr, dtype=self.np.uint8).reshape(
             frame.height, frame.width, 3).copy()
         try:
-            render_overlay(self.cv, pixels, frame, windows, decisions)
+            render_overlay(self.cv, pixels, frame, windows, decisions,
+                           mode="onnx" if self.temporal_model else "heuristic")
             self.cv.imshow(self.title, pixels)
             key = self.cv.waitKey(1) & 0xFF
         except self.cv.error as error:

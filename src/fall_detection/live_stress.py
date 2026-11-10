@@ -79,6 +79,7 @@ def run_live_stress(
     feature_config = FeatureConfig(window_size=30, min_observed_samples=8)
     records = 0
     missing_observations = 0
+    occlusion_frame_mismatches = 0
     max_window_samples = 0
     malformed_records = 0
     unsupported_predictions = 0
@@ -86,7 +87,7 @@ def run_live_stress(
     raw_data_leaks = 0
 
     def consume(record: dict) -> None:
-        nonlocal records, missing_observations, max_window_samples
+        nonlocal records, missing_observations, max_window_samples, occlusion_frame_mismatches
         nonlocal malformed_records, unsupported_predictions, unexpected_track_ids, raw_data_leaks
         if record.get("event") != "frame" or record.get("frame_index") != records:
             malformed_records += 1
@@ -101,6 +102,11 @@ def run_live_stress(
             malformed_records += 1
         if set(ids) != set(range(1, people + 1)):
             unexpected_track_ids += 1
+        # Validate which frame and which track is missing, not only the total.
+        expected_missing = records % 19 in (8, 9)
+        actual_missing = {person["track_id"] for person in observed if not person["observed"]}
+        if actual_missing != ({1} if expected_missing else set()):
+            occlusion_frame_mismatches += 1
         for person in observed:
             max_window_samples = max(max_window_samples, person["window_samples"])
             if not person["observed"]:
@@ -134,10 +140,13 @@ def run_live_stress(
             tracemalloc.stop()
 
     peak_mib = peak_bytes / (1024 * 1024)
+    expected_missing_observations = sum(index % 19 in (8, 9) for index in range(frames))
     checks = {
         "all_frames_processed": records == frames == summary.frames_processed,
         "ordered_complete_records": malformed_records == 0,
         "stable_person_ids": unexpected_track_ids == 0,
+        "occlusion_accounting_exact": missing_observations == expected_missing_observations,
+        "occlusion_timing_and_identity_exact": occlusion_frame_mismatches == 0,
         "bounded_temporal_windows": max_window_samples <= feature_config.window_size,
         "no_unverified_fall_predictions": unsupported_predictions == 0,
         "no_raw_pose_or_pixel_data": raw_data_leaks == 0,
@@ -158,6 +167,8 @@ def run_live_stress(
         "frames_processed": summary.frames_processed,
         "people": people,
         "missing_observations": missing_observations,
+        "expected_missing_observations": expected_missing_observations,
+        "occlusion_frame_mismatches": occlusion_frame_mismatches,
         "max_window_samples": max_window_samples,
         "bytes_streamed": frames * width * height * 3,
         "elapsed_seconds": round(summary.elapsed_seconds, 6),
