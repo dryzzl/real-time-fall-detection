@@ -34,6 +34,8 @@ def build_live_command(args: argparse.Namespace) -> list[str]:
     ):
         if value is not None:
             command.extend((flag, str(value)))
+    if getattr(args, "latency_report", None) is not None:
+        command.extend(("--latency-report", str(args.latency_report)))
     if args.research_alerts:
         command.append("--research-alerts")
     return command
@@ -53,10 +55,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--alert-config", type=Path)
     parser.add_argument("--max-frames", type=int)
     parser.add_argument("--output", type=Path, required=True, help="New JSONL output; never overwritten")
+    parser.add_argument("--latency-report", type=Path, help="New per-stage timing report (live webcam/video only)")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--open-browser", action="store_true")
     args = parser.parse_args(argv)
 
+    if args.demo and (args.model or args.temporal_model or args.research_alerts or args.latency_report or args.alert_config):
+        parser.error("--demo cannot use live inference, alert, or latency options")
+    if args.latency_report is not None and args.output.resolve() == args.latency_report.resolve():
+        parser.error("--latency-report must differ from --output")
+    if args.latency_report is not None and args.latency_report.exists():
+        parser.error("latency report already exists; choose a new path")
     if args.output.exists():
         parser.error("output already exists; choose a new JSONL path")
     if args.camera is not None and args.camera < 0:

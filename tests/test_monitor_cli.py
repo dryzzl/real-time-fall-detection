@@ -55,6 +55,39 @@ class MonitorLauncherTests(unittest.TestCase):
             self.assertEqual(len([e for e in payload["events"] if e["event"] == "frame"]), 3)
             self.assertTrue(all(e.get("state") == "unknown" for e in payload["events"] if e["event"] == "frame"))
 
+    def test_latency_report_is_passed_to_live_child(self):
+        from argparse import Namespace
+        args = Namespace(camera=0, video=None, demo=False, output=Path("stream.jsonl"),
+                         max_frames=8, model=None, temporal_model=None,
+                         alert_config=None, research_alerts=False,
+                         latency_report=Path("timing.json"))
+        command = build_live_command(args)
+        self.assertEqual(command[command.index("--latency-report") + 1], "timing.json")
+
+    def test_latency_report_cannot_clobber_stream_or_existing_report(self):
+        with TemporaryDirectory() as folder:
+            path = Path(folder) / "stream.jsonl"
+            with patch("fall_detection.monitor_cli.subprocess.Popen") as popen:
+                for extra in (["--latency-report", str(path)],):
+                    with self.assertRaises(SystemExit) as error:
+                        main(["--camera", "0", "--output", str(path), *extra])
+                    self.assertEqual(error.exception.code, 2)
+                report = Path(folder) / "timing.json"
+                report.write_text("keep", encoding="utf-8")
+                with self.assertRaises(SystemExit) as error:
+                    main(["--camera", "0", "--output", str(path), "--latency-report", str(report)])
+                self.assertEqual(error.exception.code, 2)
+                popen.assert_not_called()
+                self.assertEqual(report.read_text(encoding="utf-8"), "keep")
+
+    def test_demo_rejects_inference_flags_that_would_be_ignored(self):
+        with TemporaryDirectory() as folder:
+            with patch("fall_detection.monitor_cli.subprocess.Popen") as popen:
+                with self.assertRaises(SystemExit) as error:
+                    main(["--demo", "--output", str(Path(folder) / "out.jsonl"), "--model", "pose.onnx"])
+                self.assertEqual(error.exception.code, 2)
+                popen.assert_not_called()
+
     def test_rejects_existing_output_without_launching_child(self):
         with TemporaryDirectory() as folder:
             output = Path(folder) / "existing.jsonl"
