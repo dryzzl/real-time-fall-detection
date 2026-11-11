@@ -30,6 +30,31 @@ class MonitorLauncherTests(unittest.TestCase):
         self.assertIn("--research-alerts", command)
         self.assertEqual(command[command.index("--temporal-model") + 1], "temporal.onnx")
 
+    def test_demo_command_uses_synthetic_producer_without_model_or_camera(self):
+        from argparse import Namespace
+        args = Namespace(camera=None, video=None, demo=True, output=Path("demo.jsonl"),
+                         max_frames=12, model=None, temporal_model=None,
+                         alert_config=None, research_alerts=False)
+        self.assertEqual(build_live_command(args), [
+            __import__("sys").executable, "-m", "fall_detection", "demo",
+            "--frames", "12", "--realtime", "--output", "demo.jsonl",
+        ])
+
+    def test_demo_browser_stream_integration(self):
+        with TemporaryDirectory() as folder:
+            from subprocess import run
+            from fall_detection.dashboard import read_events
+            output = Path(folder) / "demo.jsonl"
+            command = build_live_command(__import__("argparse").Namespace(
+                camera=None, video=None, demo=True, output=output, max_frames=3,
+                model=None, temporal_model=None, alert_config=None, research_alerts=False))
+            # Exercise the real synthetic producer, not a mocked frame writer.
+            result = run(command, capture_output=True, text=True, timeout=15)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = read_events(output)
+            self.assertEqual(len([e for e in payload["events"] if e["event"] == "frame"]), 3)
+            self.assertTrue(all(e.get("state") == "unknown" for e in payload["events"] if e["event"] == "frame"))
+
     def test_rejects_existing_output_without_launching_child(self):
         with TemporaryDirectory() as folder:
             output = Path(folder) / "existing.jsonl"

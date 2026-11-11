@@ -18,6 +18,9 @@ from .dashboard import create_server
 def build_live_command(args: argparse.Namespace) -> list[str]:
     """Construct a shell-free command with explicit, supported live options."""
     command = [sys.executable, "-m", "fall_detection.live_cli"]
+    if getattr(args, "demo", False):
+        return [sys.executable, "-m", "fall_detection", "demo", "--frames",
+                str(args.max_frames or 120), "--realtime", "--output", str(args.output)]
     if args.camera is not None:
         command.extend(("--camera", str(args.camera)))
     else:
@@ -43,6 +46,7 @@ def main(argv: list[str] | None = None) -> int:
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--camera", type=int)
     source.add_argument("--video", type=Path)
+    source.add_argument("--demo", action="store_true", help="Synthetic, dependency-free browser demo; no fall inference")
     parser.add_argument("--model", type=Path, help="Authorized raw YOLO11-Pose ONNX export")
     parser.add_argument("--temporal-model", type=Path, help="Compatible research temporal ONNX model")
     parser.add_argument("--research-alerts", action="store_true")
