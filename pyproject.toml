@@ -20,6 +20,7 @@ test = ["onnx>=1.17,<2"]
 fall-detection = "fall_detection.cli:main"
 fall-detection-live = "fall_detection.live_cli:main"
 fall-detection-dashboard = "fall_detection.dashboard:main"
+fall-detection-monitor = "fall_detection.monitor_cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

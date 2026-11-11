@@ -1,0 +1,105 @@
+"""Integration and lifecycle tests for the one-command live monitor launcher.
+
+All process/camera work is simulated; no trained weights or video are required.
+"""
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from tempfile import TemporaryDirectory
+import unittest
+from unittest.mock import patch
+from urllib.request import urlopen
+
+from fall_detection.monitor_cli import build_live_command, main
+
+
+class MonitorLauncherTests(unittest.TestCase):
+    def test_shell_free_command_for_video_and_optional_inference(self):
+        from argparse import Namespace
+        args = Namespace(
+            camera=None, video=Path("video with spaces.mp4"),
+            output=Path("out.jsonl"), model=Path("pose.onnx"),
+            temporal_model=Path("temporal.onnx"), max_frames=10,
+            alert_config=Path("alerts.toml"), research_alerts=True,
+        )
+        command = build_live_command(args)
+        self.assertEqual(command[1:3], ["-m", "fall_detection.live_cli"])
+        self.assertEqual(command[3:5], ["--video", "video with spaces.mp4"])
+        self.assertIn("--headless", command)
+        self.assertIn("--research-alerts", command)
+        self.assertEqual(command[command.index("--temporal-model") + 1], "temporal.onnx")
+
+    def test_rejects_existing_output_without_launching_child(self):
+        with TemporaryDirectory() as folder:
+            output = Path(folder) / "existing.jsonl"
+            output.write_text("original", encoding="utf-8")
+            with patch("fall_detection.monitor_cli.subprocess.Popen") as popen:
+                with self.assertRaises(SystemExit) as error:
+                    main(["--camera", "0", "--output", str(output), "--port", "0"])
+                self.assertEqual(error.exception.code, 2)
+                popen.assert_not_called()
+            self.assertEqual(output.read_text(encoding="utf-8"), "original")
+
+    def test_one_command_exposes_live_jsonl_through_actual_loopback_http(self):
+        with TemporaryDirectory() as folder:
+            output = Path(folder) / "live.jsonl"
+            observed = {}
+
+            class FakeChild:
+                def __init__(self, command):
+                    observed["command"] = command
+
+                def wait(self, timeout=None):
+                    # A fake producer writes the same metadata contract as live_cli.
+                    with output.open("x", encoding="utf-8") as stream:
+                        stream.write(json.dumps({
+                            "event": "frame", "frame_index": 0,
+                            "state": "unknown", "fall_detection_available": False,
+                            "source": "synthetic_test",
+                            "bgr": "must_never_reach_browser",
+                        }) + "\n")
+                    with urlopen(observed["url"] + "/api/snapshot", timeout=3) as response:
+                        observed["payload"] = json.load(response)
+                    return 0
+
+                def poll(self):
+                    return 0
+
+            def fake_launch(command):
+                return FakeChild(command)
+
+            # Capture the bound ephemeral port without opening a browser.
+            from fall_detection.dashboard import create_server
+            def server_factory(path, port):
+                server = create_server(path, port)
+                observed["url"] = f"http://127.0.0.1:{server.server_port}"
+                return server
+
+            with patch("fall_detection.monitor_cli.subprocess.Popen", side_effect=fake_launch), \
+                 patch("fall_detection.monitor_cli.create_server", side_effect=server_factory), \
+                 patch("fall_detection.monitor_cli.webbrowser.open") as browser:
+                self.assertEqual(main(["--camera", "0", "--output", str(output), "--port", "0"]), 0)
+                browser.assert_not_called()
+
+            events = observed["payload"]["events"]
+            self.assertEqual(len(events), 1)
+            self.assertEqual(events[0]["state"], "unknown")
+            self.assertFalse(events[0]["fall_detection_available"])
+            self.assertNotIn("bgr", json.dumps(observed["payload"]))
+            self.assertEqual(observed["command"][3:5], ["--camera", "0"])
+
+    def test_child_exit_code_is_propagated(self):
+        with TemporaryDirectory() as folder:
+            class FailedChild:
+                def wait(self, timeout=None):
+                    return 2
+                def poll(self):
+                    return 2
+            with patch("fall_detection.monitor_cli.subprocess.Popen", return_value=FailedChild()):
+                self.assertEqual(main(["--camera", "0", "--output",
+                                       str(Path(folder) / "new.jsonl"), "--port", "0"]), 2)
+
+
+if __name__ == "__main__":
+    unittest.main()
