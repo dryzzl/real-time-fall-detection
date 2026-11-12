@@ -9,6 +9,8 @@ import argparse
 from pathlib import Path
 import subprocess
 import sys
+import time
+from math import isfinite
 from threading import Thread
 import webbrowser
 
@@ -56,6 +58,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-frames", type=int)
     parser.add_argument("--output", type=Path, required=True, help="New JSONL output; never overwritten")
     parser.add_argument("--latency-report", type=Path, help="New per-stage timing report (live webcam/video only)")
+    parser.add_argument("--hold-seconds", type=float, default=0.0,
+                        help="Keep dashboard available after capture ends (0-3600 seconds)")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--open-browser", action="store_true")
     args = parser.parse_args(argv)
@@ -66,6 +70,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--latency-report must differ from --output")
     if args.latency_report is not None and args.latency_report.exists():
         parser.error("latency report already exists; choose a new path")
+    if not isfinite(args.hold_seconds) or not 0 <= args.hold_seconds <= 3600:
+        parser.error("--hold-seconds must be finite and between 0 and 3600")
     if args.output.exists():
         parser.error("output already exists; choose a new JSONL path")
     if args.camera is not None and args.camera < 0:
@@ -85,7 +91,11 @@ def main(argv: list[str] | None = None) -> int:
         if args.open_browser:
             webbrowser.open(url)
         child = subprocess.Popen(build_live_command(args))
-        return child.wait()
+        result = child.wait()
+        if args.hold_seconds:
+            print(f"Capture finished (exit {result}); dashboard remains available for {args.hold_seconds:g}s.", flush=True)
+            time.sleep(args.hold_seconds)
+        return result
     except KeyboardInterrupt:
         if child is not None and child.poll() is None:
             child.terminate()
