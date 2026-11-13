@@ -187,6 +187,8 @@ th{color:#9eabc3;font-weight:500}td{font-variant-numeric:tabular-nums}
 <div class="card"><div class="label">Visible alerts (latest frame)</div><div class="value" id="alerts">—</div></div>
 <div class="card"><div class="label">Local log freshness</div><div class="value" id="freshness">—</div></div>
 <div class="card"><div class="label">Capture throughput (reported)</div><div class="value" id="throughput">—</div></div>
+<div class="card"><div class="label">Frames processed (reported)</div><div class="value" id="processed">—</div></div>
+<div class="card"><div class="label">Capture elapsed (reported)</div><div class="value" id="elapsed">—</div></div>
 </div>
 <section><h2>Tracked people — latest frame (unvalidated)</h2><div class="table-wrap"><table><thead><tr><th>Track</th><th>Research state</th><th>Observed</th><th>Window ready</th><th>Reason</th></tr></thead><tbody id="person-rows"></tbody></table></div></section>
 <section><h2>Research alert states — NOT emergency notifications</h2><div class="table-wrap"><table><thead><tr><th>Track</th><th>Local status</th><th>Observed state</th><th>Alert ID</th></tr></thead><tbody id="alert-rows"></tbody></table></div></section>
@@ -202,6 +204,10 @@ function addSummary(event){
   if(typeof fps==='number' && Number.isFinite(fps) && fps>=0){
     $('throughput').textContent=fps.toFixed(1)+' FPS';
   }
+  const processed=event.frames_processed;
+  if(Number.isSafeInteger(processed) && processed>=0)$('processed').textContent=processed.toLocaleString();
+  const elapsed=event.elapsed_seconds;
+  if(typeof elapsed==='number' && Number.isFinite(elapsed) && elapsed>=0)$('elapsed').textContent=elapsed.toFixed(1)+' s';
   $('connection').textContent='Capture summary received';
 }
 function addFrame(event){
@@ -252,7 +258,7 @@ async function poll(){
     const res=await fetch('/api/events?cursor='+encodeURIComponent(cursor)+'&limit=200',{cache:'no-store'});
     if(!res.ok)throw new Error('HTTP '+res.status);
     const payload=await res.json();
-    if(payload.reset){frames=0;$('frames').textContent='0';$('state').textContent='—';$('people').textContent='—';$('alerts').textContent='—';$('rows').replaceChildren();$('person-rows').replaceChildren();$('alert-rows').replaceChildren();$('throughput').textContent='—';}
+    if(payload.reset){frames=0;$('frames').textContent='0';$('state').textContent='—';$('people').textContent='—';$('alerts').textContent='—';$('rows').replaceChildren();$('person-rows').replaceChildren();$('alert-rows').replaceChildren();$('throughput').textContent='—';$('processed').textContent='—';$('elapsed').textContent='—';}
     cursor=payload.next_cursor;
     for(const event of payload.events){if(event.event==='frame')addFrame(event);else if(event.event==='summary')addSummary(event);}
     await refreshHealth();
