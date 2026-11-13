@@ -265,8 +265,8 @@ async function bootstrap(){
     if(!response.ok)throw new Error('HTTP '+response.status);
     const payload=await response.json();
     cursor=payload.next_cursor;
-    for(const event of payload.events){if(event.event==='frame')addFrame(event);}
-    $('connection').textContent=payload.source_exists?'Reading local log':'Waiting for log';
+    for(const event of payload.events){if(event.event==='frame')addFrame(event);else if(event.event==='summary')addSummary(event);}
+    if(!payload.events.some(event=>event.event==='summary'))$('connection').textContent=payload.source_exists?'Reading local log':'Waiting for log';
   }catch(err){$('connection').textContent='Snapshot unavailable';}
   poll();
   setInterval(poll,1000);
