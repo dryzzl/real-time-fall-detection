@@ -12,7 +12,13 @@ class BrowserSummaryTests(unittest.TestCase):
 
     def test_bootstrap_and_poll_render_summary_and_reset_throughput(self):
         self.assertIn('id="throughput"', HTML)
+        self.assertIn('id="processed"', HTML)
+        self.assertIn('id="elapsed"', HTML)
         self.assertIn("function addSummary(event)", HTML)
         self.assertEqual(HTML.count("else if(event.event==='summary')addSummary(event)"), 2)
         self.assertIn("$('throughput').textContent='—'", HTML)
         self.assertIn("Capture summary received", HTML)
+        self.assertIn("Number.isSafeInteger(processed)", HTML)
+        self.assertIn("Number.isFinite(elapsed)", HTML)
+        self.assertIn("processed').textContent='—'", HTML)
+        self.assertIn("elapsed').textContent='—'", HTML)
