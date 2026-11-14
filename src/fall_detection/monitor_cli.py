@@ -9,6 +9,8 @@ import argparse
 from pathlib import Path
 import subprocess
 import sys
+import time
+from math import isfinite
 from threading import Thread
 import webbrowser
 
@@ -18,6 +20,9 @@ from .dashboard import create_server
 def build_live_command(args: argparse.Namespace) -> list[str]:
     """Construct a shell-free command with explicit, supported live options."""
     command = [sys.executable, "-m", "fall_detection.live_cli"]
+    if getattr(args, "demo", False):
+        return [sys.executable, "-m", "fall_detection", "demo", "--frames",
+                str(args.max_frames or 120), "--realtime", "--output", str(args.output)]
     if args.camera is not None:
         command.extend(("--camera", str(args.camera)))
     else:
@@ -31,6 +36,8 @@ def build_live_command(args: argparse.Namespace) -> list[str]:
     ):
         if value is not None:
             command.extend((flag, str(value)))
+    if getattr(args, "latency_report", None) is not None:
+        command.extend(("--latency-report", str(args.latency_report)))
     if args.research_alerts:
         command.append("--research-alerts")
     return command
@@ -43,16 +50,42 @@ def main(argv: list[str] | None = None) -> int:
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--camera", type=int)
     source.add_argument("--video", type=Path)
+    source.add_argument("--demo", action="store_true", help="Synthetic, dependency-free browser demo; no fall inference")
     parser.add_argument("--model", type=Path, help="Authorized raw YOLO11-Pose ONNX export")
     parser.add_argument("--temporal-model", type=Path, help="Compatible research temporal ONNX model")
     parser.add_argument("--research-alerts", action="store_true")
     parser.add_argument("--alert-config", type=Path)
     parser.add_argument("--max-frames", type=int)
     parser.add_argument("--output", type=Path, required=True, help="New JSONL output; never overwritten")
+    parser.add_argument("--latency-report", type=Path, help="New per-stage timing report (live webcam/video only)")
+    parser.add_argument("--hold-seconds", type=float, default=None,
+                        help="Keep dashboard available after capture ends (0-3600 seconds)")
     parser.add_argument("--port", type=int, default=8765)
-    parser.add_argument("--open-browser", action="store_true")
+    browser = parser.add_mutually_exclusive_group()
+    browser.add_argument("--open-browser", dest="open_browser", action="store_true", default=None,
+                         help="Open the local dashboard in a browser (default for --demo)")
+    browser.add_argument("--no-open-browser", dest="open_browser", action="store_false",
+                         help="Do not open a browser (useful for CI and headless demos)")
     args = parser.parse_args(argv)
 
+    # Demo mode is intended to be visible without a second terminal or manual URL.
+    # Live capture remains opt-in so unattended camera jobs never launch a browser.
+    if args.open_browser is None:
+        args.open_browser = args.demo
+
+    # A short synthetic capture otherwise exits before a person can inspect the browser.
+    # Explicit --hold-seconds 0 still opts out; live captures retain immediate exit.
+    if args.hold_seconds is None:
+        args.hold_seconds = 30.0 if args.demo else 0.0
+
+    if args.demo and (args.model or args.temporal_model or args.research_alerts or args.latency_report or args.alert_config):
+        parser.error("--demo cannot use live inference, alert, or latency options")
+    if args.latency_report is not None and args.output.resolve() == args.latency_report.resolve():
+        parser.error("--latency-report must differ from --output")
+    if args.latency_report is not None and args.latency_report.exists():
+        parser.error("latency report already exists; choose a new path")
+    if not isfinite(args.hold_seconds) or not 0 <= args.hold_seconds <= 3600:
+        parser.error("--hold-seconds must be finite and between 0 and 3600")
     if args.output.exists():
         parser.error("output already exists; choose a new JSONL path")
     if args.camera is not None and args.camera < 0:
@@ -72,7 +105,11 @@ def main(argv: list[str] | None = None) -> int:
         if args.open_browser:
             webbrowser.open(url)
         child = subprocess.Popen(build_live_command(args))
-        return child.wait()
+        result = child.wait()
+        if args.hold_seconds:
+            print(f"Capture finished (exit {result}); dashboard remains available for {args.hold_seconds:g}s.", flush=True)
+            time.sleep(args.hold_seconds)
+        return result
     except KeyboardInterrupt:
         if child is not None and child.poll() is None:
             child.terminate()
