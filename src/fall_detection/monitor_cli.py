@@ -61,8 +61,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--hold-seconds", type=float, default=None,
                         help="Keep dashboard available after capture ends (0-3600 seconds)")
     parser.add_argument("--port", type=int, default=8765)
-    parser.add_argument("--open-browser", action="store_true")
+    browser = parser.add_mutually_exclusive_group()
+    browser.add_argument("--open-browser", dest="open_browser", action="store_true", default=None,
+                         help="Open the local dashboard in a browser (default for --demo)")
+    browser.add_argument("--no-open-browser", dest="open_browser", action="store_false",
+                         help="Do not open a browser (useful for CI and headless demos)")
     args = parser.parse_args(argv)
+
+    # Demo mode is intended to be visible without a second terminal or manual URL.
+    # Live capture remains opt-in so unattended camera jobs never launch a browser.
+    if args.open_browser is None:
+        args.open_browser = args.demo
 
     # A short synthetic capture otherwise exits before a person can inspect the browser.
     # Explicit --hold-seconds 0 still opts out; live captures retain immediate exit.
