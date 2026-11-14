@@ -58,11 +58,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-frames", type=int)
     parser.add_argument("--output", type=Path, required=True, help="New JSONL output; never overwritten")
     parser.add_argument("--latency-report", type=Path, help="New per-stage timing report (live webcam/video only)")
-    parser.add_argument("--hold-seconds", type=float, default=0.0,
+    parser.add_argument("--hold-seconds", type=float, default=None,
                         help="Keep dashboard available after capture ends (0-3600 seconds)")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--open-browser", action="store_true")
     args = parser.parse_args(argv)
+
+    # A short synthetic capture otherwise exits before a person can inspect the browser.
+    # Explicit --hold-seconds 0 still opts out; live captures retain immediate exit.
+    if args.hold_seconds is None:
+        args.hold_seconds = 30.0 if args.demo else 0.0
 
     if args.demo and (args.model or args.temporal_model or args.research_alerts or args.latency_report or args.alert_config):
         parser.error("--demo cannot use live inference, alert, or latency options")
