@@ -147,6 +147,59 @@ class MonitorLauncherTests(unittest.TestCase):
             self.assertNotIn("bgr", json.dumps(observed["payload"]))
             self.assertEqual(observed["command"][3:5], ["--camera", "0"])
 
+    def test_browser_failure_does_not_prevent_capture(self):
+        with TemporaryDirectory() as folder:
+            output = Path(folder) / "demo.jsonl"
+
+            class CompletedChild:
+                def wait(self, timeout=None):
+                    return 0
+
+                def poll(self):
+                    return 0
+
+            with patch("fall_detection.monitor_cli.webbrowser.open", side_effect=OSError("no desktop")), \
+                 patch("fall_detection.monitor_cli.subprocess.Popen", return_value=CompletedChild()) as popen:
+                self.assertEqual(main(["--demo", "--output", str(output),
+                                       "--port", "0", "--hold-seconds", "0"]), 0)
+                popen.assert_called_once()
+
+    def test_capture_timeout_terminates_child_and_returns_124(self):
+        import subprocess
+        with TemporaryDirectory() as folder:
+            output = Path(folder) / "timed.jsonl"
+
+            class StuckChild:
+                terminated = False
+
+                def wait(self, timeout=None):
+                    if not self.terminated:
+                        raise subprocess.TimeoutExpired("live_cli", timeout)
+                    return -15
+
+                def poll(self):
+                    return None if not self.terminated else -15
+
+                def terminate(self):
+                    self.terminated = True
+
+            child = StuckChild()
+            with patch("fall_detection.monitor_cli.subprocess.Popen", return_value=child):
+                self.assertEqual(main(["--camera", "0", "--output", str(output),
+                                       "--port", "0", "--capture-timeout", "0.01"]), 124)
+            self.assertTrue(child.terminated)
+
+    def test_capture_timeout_rejects_nonpositive_and_nonfinite_values(self):
+        with TemporaryDirectory() as folder:
+            output = Path(folder) / "timed.jsonl"
+            with patch("fall_detection.monitor_cli.subprocess.Popen") as popen:
+                for value in ("0", "-1", "nan", "inf"):
+                    with self.subTest(value=value), self.assertRaises(SystemExit) as error:
+                        main(["--camera", "0", "--output", str(output),
+                              "--capture-timeout", value])
+                    self.assertEqual(error.exception.code, 2)
+                popen.assert_not_called()
+
     def test_child_exit_code_is_propagated(self):
         with TemporaryDirectory() as folder:
             class FailedChild:
