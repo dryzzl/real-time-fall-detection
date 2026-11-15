@@ -61,6 +61,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--hold-seconds", type=float, default=None,
                         help="Keep dashboard available after capture ends (0-3600 seconds)")
     parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--capture-timeout", type=float, default=None,
+                        help="Stop capture after this many seconds (positive, finite; exit 124)")
     browser = parser.add_mutually_exclusive_group()
     browser.add_argument("--open-browser", dest="open_browser", action="store_true", default=None,
                          help="Open the local dashboard in a browser (default for --demo)")
@@ -86,6 +88,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("latency report already exists; choose a new path")
     if not isfinite(args.hold_seconds) or not 0 <= args.hold_seconds <= 3600:
         parser.error("--hold-seconds must be finite and between 0 and 3600")
+    if args.capture_timeout is not None and (not isfinite(args.capture_timeout) or args.capture_timeout <= 0):
+        parser.error("--capture-timeout must be finite and positive")
     if args.output.exists():
         parser.error("output already exists; choose a new JSONL path")
     if args.camera is not None and args.camera < 0:
@@ -112,7 +116,17 @@ def main(argv: list[str] | None = None) -> int:
                 # synthetic metadata capture in a headless environment.
                 print(f"Browser launch unavailable ({error}); visit {url}", file=sys.stderr)
         child = subprocess.Popen(build_live_command(args))
-        result = child.wait()
+        try:
+            result = child.wait(timeout=args.capture_timeout) if args.capture_timeout is not None else child.wait()
+        except subprocess.TimeoutExpired:
+            print("Capture exceeded --capture-timeout; terminating child process.", file=sys.stderr)
+            child.terminate()
+            try:
+                child.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                child.kill()
+                child.wait()
+            result = 124
         if args.hold_seconds:
             print(f"Capture finished (exit {result}); dashboard remains available for {args.hold_seconds:g}s.", flush=True)
             time.sleep(args.hold_seconds)
