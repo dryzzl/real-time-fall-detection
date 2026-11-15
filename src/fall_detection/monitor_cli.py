@@ -103,7 +103,14 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Research metadata dashboard: {url}", flush=True)
         print("Fall states are unvalidated; this is NOT an emergency monitoring system.", flush=True)
         if args.open_browser:
-            webbrowser.open(url)
+            try:
+                opened = webbrowser.open(url)
+                if not opened:
+                    print(f"Browser did not open automatically; visit {url}", file=sys.stderr)
+            except (OSError, webbrowser.Error) as error:
+                # An unavailable browser must not prevent video inference or
+                # synthetic metadata capture in a headless environment.
+                print(f"Browser launch unavailable ({error}); visit {url}", file=sys.stderr)
         child = subprocess.Popen(build_live_command(args))
         result = child.wait()
         if args.hold_seconds:
