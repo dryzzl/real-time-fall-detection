@@ -32,6 +32,7 @@ def build_live_command(args: argparse.Namespace) -> list[str]:
         ("--model", args.model),
         ("--temporal-model", args.temporal_model),
         ("--max-frames", args.max_frames),
+        ("--fallback-fps", getattr(args, "fallback_fps", None)),
         ("--alert-config", args.alert_config),
     ):
         if value is not None:
@@ -56,6 +57,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--research-alerts", action="store_true")
     parser.add_argument("--alert-config", type=Path)
     parser.add_argument("--max-frames", type=int)
+    parser.add_argument("--fallback-fps", type=float, default=None,
+                        help="FPS to use when camera/video metadata is unavailable (live only)")
     parser.add_argument("--output", type=Path, required=True, help="New JSONL output; never overwritten")
     parser.add_argument("--latency-report", type=Path, help="New per-stage timing report (live webcam/video only)")
     parser.add_argument("--hold-seconds", type=float, default=None,
@@ -80,7 +83,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.hold_seconds is None:
         args.hold_seconds = 30.0 if args.demo else 0.0
 
-    if args.demo and (args.model or args.temporal_model or args.research_alerts or args.latency_report or args.alert_config):
+    if args.demo and (args.model or args.temporal_model or args.research_alerts or args.latency_report or args.alert_config or args.fallback_fps is not None):
         parser.error("--demo cannot use live inference, alert, or latency options")
     if args.latency_report is not None and args.output.resolve() == args.latency_report.resolve():
         parser.error("--latency-report must differ from --output")
@@ -92,6 +95,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--capture-timeout must be finite and positive")
     if args.output.exists():
         parser.error("output already exists; choose a new JSONL path")
+    if args.fallback_fps is not None and (not isfinite(args.fallback_fps) or args.fallback_fps <= 0):
+        parser.error("--fallback-fps must be finite and positive")
     if args.camera is not None and args.camera < 0:
         parser.error("camera index must be nonnegative")
     if args.max_frames is not None and args.max_frames <= 0:
