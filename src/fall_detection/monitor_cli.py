@@ -22,7 +22,9 @@ def build_live_command(args: argparse.Namespace) -> list[str]:
     command = [sys.executable, "-m", "fall_detection.live_cli"]
     if getattr(args, "demo", False):
         return [sys.executable, "-m", "fall_detection", "demo", "--frames",
-                str(args.max_frames or 120), "--realtime", "--output", str(args.output)]
+                str(args.max_frames or 120),
+                *([] if getattr(args, "demo_fast", False) else ["--realtime"]),
+                "--output", str(args.output)]
     if args.camera is not None:
         command.extend(("--camera", str(args.camera)))
     else:
@@ -52,6 +54,8 @@ def main(argv: list[str] | None = None) -> int:
     source.add_argument("--camera", type=int)
     source.add_argument("--video", type=Path)
     source.add_argument("--demo", action="store_true", help="Synthetic, dependency-free browser demo; no fall inference")
+    parser.add_argument("--demo-fast", action="store_true",
+                        help="Generate synthetic demo frames without realtime pacing (requires --demo)")
     parser.add_argument("--model", type=Path, help="Authorized raw YOLO11-Pose ONNX export")
     parser.add_argument("--temporal-model", type=Path, help="Compatible research temporal ONNX model")
     parser.add_argument("--research-alerts", action="store_true")
@@ -83,6 +87,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.hold_seconds is None:
         args.hold_seconds = 30.0 if args.demo else 0.0
 
+    if args.demo_fast and not args.demo:
+        parser.error("--demo-fast requires --demo")
     if args.demo and (args.model or args.temporal_model or args.research_alerts or args.latency_report or args.alert_config or args.fallback_fps is not None):
         parser.error("--demo cannot use live inference, alert, or latency options")
     if args.latency_report is not None and args.output.resolve() == args.latency_report.resolve():
