@@ -200,6 +200,44 @@ class MonitorLauncherTests(unittest.TestCase):
                     self.assertEqual(error.exception.code, 2)
                 popen.assert_not_called()
 
+    def test_fallback_fps_is_forwarded_to_live_capture(self):
+        from argparse import Namespace
+        args = Namespace(camera=0, video=None, demo=False, output=Path("live.jsonl"),
+                         max_frames=8, model=None, temporal_model=None,
+                         alert_config=None, research_alerts=False, fallback_fps=24.5)
+        command = build_live_command(args)
+        self.assertEqual(command[command.index("--fallback-fps") + 1], "24.5")
+
+    def test_fallback_fps_validation_rejects_invalid_and_demo_usage(self):
+        with TemporaryDirectory() as folder:
+            output = str(Path(folder) / "live.jsonl")
+            with patch("fall_detection.monitor_cli.subprocess.Popen") as popen:
+                for value in ("0", "-1", "nan", "inf"):
+                    with self.subTest(value=value), self.assertRaises(SystemExit) as error:
+                        main(["--camera", "0", "--output", output, "--fallback-fps", value])
+                    self.assertEqual(error.exception.code, 2)
+                with self.assertRaises(SystemExit) as error:
+                    main(["--demo", "--output", output, "--fallback-fps", "24"])
+                self.assertEqual(error.exception.code, 2)
+                popen.assert_not_called()
+
+    def test_fast_demo_removes_realtime_pacing(self):
+        from argparse import Namespace
+        args = Namespace(camera=None, video=None, demo=True, demo_fast=True,
+                         output=Path("demo.jsonl"), max_frames=3)
+        command = build_live_command(args)
+        self.assertNotIn("--realtime", command)
+        self.assertEqual(command[command.index("--frames") + 1], "3")
+
+    def test_fast_demo_rejects_live_capture(self):
+        with TemporaryDirectory() as folder:
+            with patch("fall_detection.monitor_cli.subprocess.Popen") as popen:
+                with self.assertRaises(SystemExit) as error:
+                    main(["--camera", "0", "--output", str(Path(folder) / "live.jsonl"),
+                          "--demo-fast"])
+                self.assertEqual(error.exception.code, 2)
+                popen.assert_not_called()
+
     def test_child_exit_code_is_propagated(self):
         with TemporaryDirectory() as folder:
             class FailedChild:
