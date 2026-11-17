@@ -34,7 +34,7 @@ class MonitorPreflightAndFailureHoldTests(unittest.TestCase):
                 ["--camera", "0", "--temporal-model", str(root / "missing.onnx")],
                 ["--camera", "0", "--research-alerts", "--alert-config", str(root / "missing.toml")],
             )
-            with patch("fall_detection.monitor_cli.create_server") as server, \\
+            with patch("fall_detection.monitor_cli.create_server") as server, \
                  patch("fall_detection.monitor_cli.subprocess.Popen") as popen:
                 for options in cases:
                     with self.subTest(options=options), self.assertRaises(SystemExit) as error:
@@ -56,7 +56,7 @@ class MonitorPreflightAndFailureHoldTests(unittest.TestCase):
     def test_failed_capture_uses_failure_hold_instead_of_success_hold(self):
         with TemporaryDirectory() as folder:
             output = str(Path(folder) / "stream.jsonl")
-            with patch("fall_detection.monitor_cli.subprocess.Popen", return_value=_Child(7)), \\
+            with patch("fall_detection.monitor_cli.subprocess.Popen", return_value=_Child(7)), \
                  patch("fall_detection.monitor_cli.time.sleep") as sleep:
                 result = main(["--camera", "0", "--output", output, "--port", "0",
                                "--hold-seconds", "9", "--failure-hold-seconds", "3"])
@@ -66,7 +66,7 @@ class MonitorPreflightAndFailureHoldTests(unittest.TestCase):
     def test_successful_capture_preserves_normal_hold(self):
         with TemporaryDirectory() as folder:
             output = str(Path(folder) / "stream.jsonl")
-            with patch("fall_detection.monitor_cli.subprocess.Popen", return_value=_Child(0)), \\
+            with patch("fall_detection.monitor_cli.subprocess.Popen", return_value=_Child(0)), \
                  patch("fall_detection.monitor_cli.time.sleep") as sleep:
                 result = main(["--camera", "0", "--output", output, "--port", "0",
                                "--hold-seconds", "2", "--failure-hold-seconds", "3"])
