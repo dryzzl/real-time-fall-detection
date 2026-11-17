@@ -103,6 +103,14 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("output already exists; choose a new JSONL path")
     if args.fallback_fps is not None and (not isfinite(args.fallback_fps) or args.fallback_fps <= 0):
         parser.error("--fallback-fps must be finite and positive")
+    # Fail before opening a browser or starting a child when local inference
+    # artifacts cannot possibly be loaded. Camera devices are checked by the
+    # live runner because they may be virtual or hot-plugged.
+    for label, candidate in (("--video", args.video), ("--model", args.model),
+                             ("--temporal-model", args.temporal_model),
+                             ("--alert-config", args.alert_config if args.research_alerts else None)):
+        if candidate is not None and not candidate.is_file():
+            parser.error(f"{label} must refer to an existing regular file: {candidate}")
     if args.camera is not None and args.camera < 0:
         parser.error("camera index must be nonnegative")
     if args.max_frames is not None and args.max_frames <= 0:
