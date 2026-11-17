@@ -67,6 +67,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--latency-report", type=Path, help="New per-stage timing report (live webcam/video only)")
     parser.add_argument("--hold-seconds", type=float, default=None,
                         help="Keep dashboard available after capture ends (0-3600 seconds)")
+    parser.add_argument("--failure-hold-seconds", type=float, default=0.0,
+                        help="Keep dashboard available after failed capture (0-3600 seconds)")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--capture-timeout", type=float, default=None,
                         help="Stop capture after this many seconds (positive, finite; exit 124)")
@@ -97,6 +99,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("latency report already exists; choose a new path")
     if not isfinite(args.hold_seconds) or not 0 <= args.hold_seconds <= 3600:
         parser.error("--hold-seconds must be finite and between 0 and 3600")
+    if not isfinite(args.failure_hold_seconds) or not 0 <= args.failure_hold_seconds <= 3600:
+        parser.error("--failure-hold-seconds must be finite and between 0 and 3600")
     if args.capture_timeout is not None and (not isfinite(args.capture_timeout) or args.capture_timeout <= 0):
         parser.error("--capture-timeout must be finite and positive")
     if args.output.exists():
@@ -146,9 +150,13 @@ def main(argv: list[str] | None = None) -> int:
                 child.kill()
                 child.wait()
             result = 124
-        if args.hold_seconds:
-            print(f"Capture finished (exit {result}); dashboard remains available for {args.hold_seconds:g}s.", flush=True)
-            time.sleep(args.hold_seconds)
+        # On failed capture, allow inspecting any partial metadata or the
+        # health endpoint before the loopback server shuts down. The explicit
+        # failure hold overrides the normal successful-capture hold.
+        hold = args.failure_hold_seconds if result != 0 else args.hold_seconds
+        if hold:
+            print(f"Capture finished (exit {result}); dashboard remains available for {hold:g}s.", flush=True)
+            time.sleep(hold)
         return result
     except KeyboardInterrupt:
         if child is not None and child.poll() is None:
