@@ -71,6 +71,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--failure-hold-seconds", type=float, default=0.0,
                         help="Keep dashboard available after failed capture (0-3600 seconds)")
     parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--require-temporal", action="store_true",
+                        help="Require explicit pose and temporal ONNX model paths for a live session")
     parser.add_argument("--dry-run", action="store_true",
                         help="Validate launcher arguments and print the child command without starting capture")
     parser.add_argument("--capture-timeout", type=float, default=None,
@@ -92,6 +94,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.hold_seconds is None:
         args.hold_seconds = 30.0 if args.demo else 0.0
 
+    if args.require_temporal and (args.demo or args.model is None or args.temporal_model is None):
+        parser.error("--require-temporal needs live capture with explicit --model and --temporal-model")
     if args.demo_fast and not args.demo:
         parser.error("--demo-fast requires --demo")
     if args.demo and (args.model or args.temporal_model or args.research_alerts or args.latency_report or args.alert_config or args.fallback_fps is not None):

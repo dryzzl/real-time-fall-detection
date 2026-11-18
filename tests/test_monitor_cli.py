@@ -253,6 +253,36 @@ class MonitorLauncherTests(unittest.TestCase):
                 self.assertIn("--frames", report["command"])
             self.assertFalse(output.exists())
 
+    def test_require_temporal_rejects_missing_models_and_demo(self):
+        with TemporaryDirectory() as folder:
+            output = str(Path(folder) / "strict.jsonl")
+            with patch("fall_detection.monitor_cli.subprocess.Popen") as popen:
+                for options in (["--camera", "0"],
+                                ["--camera", "0", "--model", "pose.onnx"],
+                                ["--demo"]):
+                    with self.subTest(options=options), self.assertRaises(SystemExit) as error:
+                        main([*options, "--require-temporal", "--output", output])
+                    self.assertEqual(error.exception.code, 2)
+                popen.assert_not_called()
+
+    def test_require_temporal_accepts_explicit_existing_artifacts_for_dry_run(self):
+        with TemporaryDirectory() as folder:
+            root = Path(folder)
+            pose = root / "pose.onnx"
+            temporal = root / "temporal.onnx"
+            pose.write_bytes(b"dummy: not used in dry run")
+            temporal.write_bytes(b"dummy: not used in dry run")
+            with patch("fall_detection.monitor_cli.subprocess.Popen") as popen, \
+                 patch("builtins.print") as printer:
+                result = main(["--camera", "0", "--model", str(pose),
+                               "--temporal-model", str(temporal), "--require-temporal",
+                               "--dry-run", "--output", str(root / "stream.jsonl")])
+                self.assertEqual(result, 0)
+                popen.assert_not_called()
+                command = json.loads(printer.call_args.args[0])["command"]
+                self.assertIn(str(pose), command)
+                self.assertIn(str(temporal), command)
+
     def test_child_exit_code_is_propagated(self):
         with TemporaryDirectory() as folder:
             class FailedChild:
