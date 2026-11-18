@@ -238,6 +238,21 @@ class MonitorLauncherTests(unittest.TestCase):
                 self.assertEqual(error.exception.code, 2)
                 popen.assert_not_called()
 
+    def test_dry_run_reports_command_without_starting_capture(self):
+        with TemporaryDirectory() as folder:
+            output = Path(folder) / "dry.jsonl"
+            with patch("fall_detection.monitor_cli.subprocess.Popen") as popen, \
+                 patch("fall_detection.monitor_cli.create_server") as server, \
+                 patch("builtins.print") as printer:
+                self.assertEqual(main(["--demo", "--dry-run", "--output", str(output)]), 0)
+                popen.assert_not_called()
+                server.assert_not_called()
+                report = json.loads(printer.call_args.args[0])
+                self.assertFalse(report["capture_started"])
+                self.assertEqual(report["mode"], "synthetic")
+                self.assertIn("--frames", report["command"])
+            self.assertFalse(output.exists())
+
     def test_child_exit_code_is_propagated(self):
         with TemporaryDirectory() as folder:
             class FailedChild:

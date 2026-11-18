@@ -6,6 +6,7 @@ starts the existing live CLI as a child process and never serves video pixels.
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 import subprocess
 import sys
@@ -70,6 +71,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--failure-hold-seconds", type=float, default=0.0,
                         help="Keep dashboard available after failed capture (0-3600 seconds)")
     parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--dry-run", action="store_true",
+                        help="Validate launcher arguments and print the child command without starting capture")
     parser.add_argument("--capture-timeout", type=float, default=None,
                         help="Stop capture after this many seconds (positive, finite; exit 124)")
     browser = parser.add_mutually_exclusive_group()
@@ -119,6 +122,11 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("camera index must be nonnegative")
     if args.max_frames is not None and args.max_frames <= 0:
         parser.error("max-frames must be positive")
+
+    if args.dry_run:
+        print(json.dumps({"command": build_live_command(args), "output": str(args.output),
+                          "mode": "synthetic" if args.demo else "live", "capture_started": False}))
+        return 0
 
     server = None
     child = None
