@@ -319,9 +319,12 @@ def stream_health(path: Path, *, now_seconds: float | None = None) -> dict:
     age = max(0.0, float(now_seconds) - stat.st_mtime)
     recent_frames = [item for item in snapshot["events"] if item.get("event") == "frame"]
     latest = recent_frames[-1] if recent_frames else {}
+    # A completed capture emits a summary after its final frame. A recent
+    # modification time alone must not label that finished session as live.
+    completed = bool(snapshot["events"] and snapshot["events"][-1].get("event") == "summary")
     result.update({
         "log_exists": True,
-        "stream_status": ("empty" if not recent_frames else "active" if age <= 10.0 else "idle"),
+        "stream_status": ("completed" if completed else "empty" if not recent_frames else "active" if age <= 10.0 else "idle"),
         "log_age_seconds": round(age, 3),
         "frames_in_window": len(recent_frames),
         "last_frame_index": latest.get("frame_index"),
