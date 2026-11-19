@@ -189,6 +189,7 @@ th{color:#9eabc3;font-weight:500}td{font-variant-numeric:tabular-nums}
 <div class="card"><div class="label">Capture throughput (reported)</div><div class="value" id="throughput">—</div></div>
 <div class="card"><div class="label">Frames processed (reported)</div><div class="value" id="processed">—</div></div>
 <div class="card"><div class="label">Capture elapsed (reported)</div><div class="value" id="elapsed">—</div></div>
+<div class="card"><div class="label">Latest frame processing</div><div class="value" id="processing">—</div></div>
 </div>
 <section><h2>Tracked people — latest frame (unvalidated)</h2><div class="table-wrap"><table><thead><tr><th>Track</th><th>Research state</th><th>Observed</th><th>Window ready</th><th>Reason</th></tr></thead><tbody id="person-rows"></tbody></table></div></section>
 <section><h2>Research alert states — NOT emergency notifications</h2><div class="table-wrap"><table><thead><tr><th>Track</th><th>Local status</th><th>Observed state</th><th>Alert ID</th></tr></thead><tbody id="alert-rows"></tbody></table></div></section>
@@ -211,6 +212,9 @@ function addSummary(event){
   $('connection').textContent='Capture summary received';
 }
 function addFrame(event){
+  if(typeof event.processing_ms==='number' && Number.isFinite(event.processing_ms) && event.processing_ms>=0){
+    $('processing').textContent=event.processing_ms.toFixed(1)+' ms';
+  }
   frames+=1;$('frames').textContent=frames.toLocaleString();
   const state=typeof event.state==='string'?event.state:'unknown';$('state').textContent=state;
   $('people').textContent=Number.isInteger(event.tracked_person_count)?event.tracked_person_count:(Array.isArray(event.people)?event.people.length:'—');
@@ -249,8 +253,8 @@ async function refreshHealth(){
   if(!response.ok)throw new Error('HTTP '+response.status);
   const health=await response.json();
   const status=health.stream_status;
-  $('freshness').textContent=status==='active'?'Recent':status==='idle'?'Idle':status==='empty'?'No frames':status==='missing'?'No log':'Unavailable';
-  $('connection').textContent=status==='active'?'Recent local updates':status==='idle'?'Log idle (no recent updates)':status==='empty'?'Waiting for frames':'Waiting for log';
+  $('freshness').textContent=status==='active'?'Recent':status==='idle'?'Idle':status==='completed'?'Finished':status==='empty'?'No frames':status==='missing'?'No log':'Unavailable';
+  $('connection').textContent=status==='active'?'Recent local updates':status==='idle'?'Log idle (no recent updates)':status==='completed'?'Capture finished':status==='empty'?'Waiting for frames':'Waiting for log';
 }
 async function poll(){
   if(busy)return;busy=true;
@@ -258,7 +262,7 @@ async function poll(){
     const res=await fetch('/api/events?cursor='+encodeURIComponent(cursor)+'&limit=200',{cache:'no-store'});
     if(!res.ok)throw new Error('HTTP '+res.status);
     const payload=await res.json();
-    if(payload.reset){frames=0;$('frames').textContent='0';$('state').textContent='—';$('people').textContent='—';$('alerts').textContent='—';$('rows').replaceChildren();$('person-rows').replaceChildren();$('alert-rows').replaceChildren();$('throughput').textContent='—';$('processed').textContent='—';$('elapsed').textContent='—';}
+    if(payload.reset){frames=0;$('frames').textContent='0';$('state').textContent='—';$('people').textContent='—';$('alerts').textContent='—';$('rows').replaceChildren();$('person-rows').replaceChildren();$('alert-rows').replaceChildren();$('throughput').textContent='—';$('processed').textContent='—';$('elapsed').textContent='—';$('processing').textContent='—';}
     cursor=payload.next_cursor;
     for(const event of payload.events){if(event.event==='frame')addFrame(event);else if(event.event==='summary')addSummary(event);}
     await refreshHealth();
