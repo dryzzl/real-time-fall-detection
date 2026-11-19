@@ -186,6 +186,10 @@ th{color:#9eabc3;font-weight:500}td{font-variant-numeric:tabular-nums}
 <div class="card"><div class="label">Tracked people (latest frame)</div><div class="value" id="people">—</div></div>
 <div class="card"><div class="label">Visible alerts (latest frame)</div><div class="value" id="alerts">—</div></div>
 <div class="card"><div class="label">Local log freshness</div><div class="value" id="freshness">—</div></div>
+<div class="card"><div class="label">Capture throughput (reported)</div><div class="value" id="throughput">—</div></div>
+<div class="card"><div class="label">Frames processed (reported)</div><div class="value" id="processed">—</div></div>
+<div class="card"><div class="label">Capture elapsed (reported)</div><div class="value" id="elapsed">—</div></div>
+<div class="card"><div class="label">Latest frame processing</div><div class="value" id="processing">—</div></div>
 </div>
 <section><h2>Tracked people — latest frame (unvalidated)</h2><div class="table-wrap"><table><thead><tr><th>Track</th><th>Research state</th><th>Observed</th><th>Window ready</th><th>Reason</th></tr></thead><tbody id="person-rows"></tbody></table></div></section>
 <section><h2>Research alert states — NOT emergency notifications</h2><div class="table-wrap"><table><thead><tr><th>Track</th><th>Local status</th><th>Observed state</th><th>Alert ID</th></tr></thead><tbody id="alert-rows"></tbody></table></div></section>
@@ -196,7 +200,21 @@ th{color:#9eabc3;font-weight:500}td{font-variant-numeric:tabular-nums}
 let cursor='0',frames=0,busy=false;
 const $=id=>document.getElementById(id);
 function cell(row,value){const td=document.createElement('td');td.textContent=String(value);row.appendChild(td);return td;}
+function addSummary(event){
+  const fps=event.throughput_fps;
+  if(typeof fps==='number' && Number.isFinite(fps) && fps>=0){
+    $('throughput').textContent=fps.toFixed(1)+' FPS';
+  }
+  const processed=event.frames_processed;
+  if(Number.isSafeInteger(processed) && processed>=0)$('processed').textContent=processed.toLocaleString();
+  const elapsed=event.elapsed_seconds;
+  if(typeof elapsed==='number' && Number.isFinite(elapsed) && elapsed>=0)$('elapsed').textContent=elapsed.toFixed(1)+' s';
+  $('connection').textContent='Capture summary received';
+}
 function addFrame(event){
+  if(typeof event.processing_ms==='number' && Number.isFinite(event.processing_ms) && event.processing_ms>=0){
+    $('processing').textContent=event.processing_ms.toFixed(1)+' ms';
+  }
   frames+=1;$('frames').textContent=frames.toLocaleString();
   const state=typeof event.state==='string'?event.state:'unknown';$('state').textContent=state;
   $('people').textContent=Number.isInteger(event.tracked_person_count)?event.tracked_person_count:(Array.isArray(event.people)?event.people.length:'—');
@@ -235,8 +253,8 @@ async function refreshHealth(){
   if(!response.ok)throw new Error('HTTP '+response.status);
   const health=await response.json();
   const status=health.stream_status;
-  $('freshness').textContent=status==='active'?'Recent':status==='idle'?'Idle':status==='empty'?'No frames':status==='missing'?'No log':'Unavailable';
-  $('connection').textContent=status==='active'?'Recent local updates':status==='idle'?'Log idle (no recent updates)':status==='empty'?'Waiting for frames':'Waiting for log';
+  $('freshness').textContent=status==='active'?'Recent':status==='idle'?'Idle':status==='completed'?'Finished':status==='empty'?'No frames':status==='missing'?'No log':'Unavailable';
+  $('connection').textContent=status==='active'?'Recent local updates':status==='idle'?'Log idle (no recent updates)':status==='completed'?'Capture finished':status==='empty'?'Waiting for frames':'Waiting for log';
 }
 async function poll(){
   if(busy)return;busy=true;
@@ -244,9 +262,9 @@ async function poll(){
     const res=await fetch('/api/events?cursor='+encodeURIComponent(cursor)+'&limit=200',{cache:'no-store'});
     if(!res.ok)throw new Error('HTTP '+res.status);
     const payload=await res.json();
-    if(payload.reset){frames=0;$('frames').textContent='0';$('state').textContent='—';$('people').textContent='—';$('alerts').textContent='—';$('rows').replaceChildren();$('person-rows').replaceChildren();$('alert-rows').replaceChildren();}
+    if(payload.reset){frames=0;$('frames').textContent='0';$('state').textContent='—';$('people').textContent='—';$('alerts').textContent='—';$('rows').replaceChildren();$('person-rows').replaceChildren();$('alert-rows').replaceChildren();$('throughput').textContent='—';$('processed').textContent='—';$('elapsed').textContent='—';$('processing').textContent='—';}
     cursor=payload.next_cursor;
-    for(const event of payload.events){if(event.event==='frame')addFrame(event);}
+    for(const event of payload.events){if(event.event==='frame')addFrame(event);else if(event.event==='summary')addSummary(event);}
     await refreshHealth();
   }catch(err){$('connection').textContent='Connection unavailable';$('freshness').textContent='Unavailable';}
   finally{busy=false;}
@@ -257,8 +275,8 @@ async function bootstrap(){
     if(!response.ok)throw new Error('HTTP '+response.status);
     const payload=await response.json();
     cursor=payload.next_cursor;
-    for(const event of payload.events){if(event.event==='frame')addFrame(event);}
-    $('connection').textContent=payload.source_exists?'Reading local log':'Waiting for log';
+    for(const event of payload.events){if(event.event==='frame')addFrame(event);else if(event.event==='summary')addSummary(event);}
+    if(!payload.events.some(event=>event.event==='summary'))$('connection').textContent=payload.source_exists?'Reading local log':'Waiting for log';
   }catch(err){$('connection').textContent='Snapshot unavailable';}
   poll();
   setInterval(poll,1000);
@@ -305,9 +323,12 @@ def stream_health(path: Path, *, now_seconds: float | None = None) -> dict:
     age = max(0.0, float(now_seconds) - stat.st_mtime)
     recent_frames = [item for item in snapshot["events"] if item.get("event") == "frame"]
     latest = recent_frames[-1] if recent_frames else {}
+    # A completed capture emits a summary after its final frame. A recent
+    # modification time alone must not label that finished session as live.
+    completed = bool(snapshot["events"] and snapshot["events"][-1].get("event") == "summary")
     result.update({
         "log_exists": True,
-        "stream_status": ("empty" if not recent_frames else "active" if age <= 10.0 else "idle"),
+        "stream_status": ("completed" if completed else "empty" if not recent_frames else "active" if age <= 10.0 else "idle"),
         "log_age_seconds": round(age, 3),
         "frames_in_window": len(recent_frames),
         "last_frame_index": latest.get("frame_index"),

@@ -10,6 +10,14 @@ python -m pip install -e .
 
 No new third-party dependency is required for the dashboard itself.
 
+## One-command browser demo (no camera or model weights)
+
+```bash
+python -m fall_detection.monitor_cli --demo --output outputs/monitor-demo.jsonl --max-frames 120
+```
+
+This starts a local read-only dashboard, opens your browser automatically, streams synthetic `unknown` states, and keeps the dashboard available for **30 seconds** after capture ends. Choose a new output path for each run; files are never overwritten. Use `--hold-seconds 0` for immediate exit or `--no-open-browser` for headless CI and SSH sessions. This demo **does not detect real falls**.
+
 ## Synthetic smoke demonstration
 
 Terminal 1:

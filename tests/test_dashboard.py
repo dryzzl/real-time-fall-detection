@@ -149,7 +149,7 @@ class DashboardReaderTests(unittest.TestCase):
         fixed = 2_000_000_000.0
         os.utime(self.log, (fixed - 20, fixed - 20))
         idle = stream_health(self.log, now_seconds=fixed)
-        self.assertEqual(idle["stream_status"], "idle")
+        self.assertEqual(idle["stream_status"], "completed")
         self.assertEqual(idle["frames_in_window"], 1)
         self.assertEqual(idle["last_frame_index"], 3)
         self.assertEqual(idle["tracked_person_count"], 2)
@@ -158,7 +158,21 @@ class DashboardReaderTests(unittest.TestCase):
         self.assertTrue(idle["research_only"])
         self.assertNotIn("PRIVATE", json.dumps(idle))
         os.utime(self.log, (fixed - 1, fixed - 1))
-        self.assertEqual(stream_health(self.log, now_seconds=fixed)["stream_status"], "active")
+        self.assertEqual(stream_health(self.log, now_seconds=fixed)["stream_status"], "completed")
+
+    def test_stream_health_reports_completed_capture_without_claiming_live_activity(self):
+        self.write({"event": "frame", "frame_index": 2, "state": "unknown"})
+        self.write({"event": "summary", "frames_processed": 3})
+        self.assertEqual(stream_health(self.log)["stream_status"], "completed")
+        self.assertFalse(stream_health(self.log)["fall_detection_available"])
+        self.write({"event": "frame", "frame_index": 3})
+        self.assertEqual(stream_health(self.log)["stream_status"], "active")
+
+    def test_stream_health_summary_only_capture_is_completed(self):
+        self.write({"event": "summary", "frames_processed": 0})
+        result = stream_health(self.log)
+        self.assertEqual(result["stream_status"], "completed")
+        self.assertEqual(result["frames_in_window"], 0)
 
     def test_stream_health_missing_empty_and_invalid_clock(self):
         self.assertEqual(stream_health(self.log)["stream_status"], "missing")

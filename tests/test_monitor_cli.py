@@ -30,6 +30,64 @@ class MonitorLauncherTests(unittest.TestCase):
         self.assertIn("--research-alerts", command)
         self.assertEqual(command[command.index("--temporal-model") + 1], "temporal.onnx")
 
+    def test_demo_command_uses_synthetic_producer_without_model_or_camera(self):
+        from argparse import Namespace
+        args = Namespace(camera=None, video=None, demo=True, output=Path("demo.jsonl"),
+                         max_frames=12, model=None, temporal_model=None,
+                         alert_config=None, research_alerts=False)
+        self.assertEqual(build_live_command(args), [
+            __import__("sys").executable, "-m", "fall_detection", "demo",
+            "--frames", "12", "--realtime", "--output", "demo.jsonl",
+        ])
+
+    def test_demo_browser_stream_integration(self):
+        with TemporaryDirectory() as folder:
+            from subprocess import run
+            from fall_detection.dashboard import read_events
+            output = Path(folder) / "demo.jsonl"
+            command = build_live_command(__import__("argparse").Namespace(
+                camera=None, video=None, demo=True, output=output, max_frames=3,
+                model=None, temporal_model=None, alert_config=None, research_alerts=False))
+            # Exercise the real synthetic producer, not a mocked frame writer.
+            result = run(command, capture_output=True, text=True, timeout=15)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = read_events(output)
+            self.assertEqual(len([e for e in payload["events"] if e["event"] == "frame"]), 3)
+            self.assertTrue(all(e.get("state") == "unknown" for e in payload["events"] if e["event"] == "frame"))
+
+    def test_latency_report_is_passed_to_live_child(self):
+        from argparse import Namespace
+        args = Namespace(camera=0, video=None, demo=False, output=Path("stream.jsonl"),
+                         max_frames=8, model=None, temporal_model=None,
+                         alert_config=None, research_alerts=False,
+                         latency_report=Path("timing.json"))
+        command = build_live_command(args)
+        self.assertEqual(command[command.index("--latency-report") + 1], "timing.json")
+
+    def test_latency_report_cannot_clobber_stream_or_existing_report(self):
+        with TemporaryDirectory() as folder:
+            path = Path(folder) / "stream.jsonl"
+            with patch("fall_detection.monitor_cli.subprocess.Popen") as popen:
+                for extra in (["--latency-report", str(path)],):
+                    with self.assertRaises(SystemExit) as error:
+                        main(["--camera", "0", "--output", str(path), *extra])
+                    self.assertEqual(error.exception.code, 2)
+                report = Path(folder) / "timing.json"
+                report.write_text("keep", encoding="utf-8")
+                with self.assertRaises(SystemExit) as error:
+                    main(["--camera", "0", "--output", str(path), "--latency-report", str(report)])
+                self.assertEqual(error.exception.code, 2)
+                popen.assert_not_called()
+                self.assertEqual(report.read_text(encoding="utf-8"), "keep")
+
+    def test_demo_rejects_inference_flags_that_would_be_ignored(self):
+        with TemporaryDirectory() as folder:
+            with patch("fall_detection.monitor_cli.subprocess.Popen") as popen:
+                with self.assertRaises(SystemExit) as error:
+                    main(["--demo", "--output", str(Path(folder) / "out.jsonl"), "--model", "pose.onnx"])
+                self.assertEqual(error.exception.code, 2)
+                popen.assert_not_called()
+
     def test_rejects_existing_output_without_launching_child(self):
         with TemporaryDirectory() as folder:
             output = Path(folder) / "existing.jsonl"
@@ -88,6 +146,142 @@ class MonitorLauncherTests(unittest.TestCase):
             self.assertFalse(events[0]["fall_detection_available"])
             self.assertNotIn("bgr", json.dumps(observed["payload"]))
             self.assertEqual(observed["command"][3:5], ["--camera", "0"])
+
+    def test_browser_failure_does_not_prevent_capture(self):
+        with TemporaryDirectory() as folder:
+            output = Path(folder) / "demo.jsonl"
+
+            class CompletedChild:
+                def wait(self, timeout=None):
+                    return 0
+
+                def poll(self):
+                    return 0
+
+            with patch("fall_detection.monitor_cli.webbrowser.open", side_effect=OSError("no desktop")), \
+                 patch("fall_detection.monitor_cli.subprocess.Popen", return_value=CompletedChild()) as popen:
+                self.assertEqual(main(["--demo", "--output", str(output),
+                                       "--port", "0", "--hold-seconds", "0"]), 0)
+                popen.assert_called_once()
+
+    def test_capture_timeout_terminates_child_and_returns_124(self):
+        import subprocess
+        with TemporaryDirectory() as folder:
+            output = Path(folder) / "timed.jsonl"
+
+            class StuckChild:
+                terminated = False
+
+                def wait(self, timeout=None):
+                    if not self.terminated:
+                        raise subprocess.TimeoutExpired("live_cli", timeout)
+                    return -15
+
+                def poll(self):
+                    return None if not self.terminated else -15
+
+                def terminate(self):
+                    self.terminated = True
+
+            child = StuckChild()
+            with patch("fall_detection.monitor_cli.subprocess.Popen", return_value=child):
+                self.assertEqual(main(["--camera", "0", "--output", str(output),
+                                       "--port", "0", "--capture-timeout", "0.01"]), 124)
+            self.assertTrue(child.terminated)
+
+    def test_capture_timeout_rejects_nonpositive_and_nonfinite_values(self):
+        with TemporaryDirectory() as folder:
+            output = Path(folder) / "timed.jsonl"
+            with patch("fall_detection.monitor_cli.subprocess.Popen") as popen:
+                for value in ("0", "-1", "nan", "inf"):
+                    with self.subTest(value=value), self.assertRaises(SystemExit) as error:
+                        main(["--camera", "0", "--output", str(output),
+                              "--capture-timeout", value])
+                    self.assertEqual(error.exception.code, 2)
+                popen.assert_not_called()
+
+    def test_fallback_fps_is_forwarded_to_live_capture(self):
+        from argparse import Namespace
+        args = Namespace(camera=0, video=None, demo=False, output=Path("live.jsonl"),
+                         max_frames=8, model=None, temporal_model=None,
+                         alert_config=None, research_alerts=False, fallback_fps=24.5)
+        command = build_live_command(args)
+        self.assertEqual(command[command.index("--fallback-fps") + 1], "24.5")
+
+    def test_fallback_fps_validation_rejects_invalid_and_demo_usage(self):
+        with TemporaryDirectory() as folder:
+            output = str(Path(folder) / "live.jsonl")
+            with patch("fall_detection.monitor_cli.subprocess.Popen") as popen:
+                for value in ("0", "-1", "nan", "inf"):
+                    with self.subTest(value=value), self.assertRaises(SystemExit) as error:
+                        main(["--camera", "0", "--output", output, "--fallback-fps", value])
+                    self.assertEqual(error.exception.code, 2)
+                with self.assertRaises(SystemExit) as error:
+                    main(["--demo", "--output", output, "--fallback-fps", "24"])
+                self.assertEqual(error.exception.code, 2)
+                popen.assert_not_called()
+
+    def test_fast_demo_removes_realtime_pacing(self):
+        from argparse import Namespace
+        args = Namespace(camera=None, video=None, demo=True, demo_fast=True,
+                         output=Path("demo.jsonl"), max_frames=3)
+        command = build_live_command(args)
+        self.assertNotIn("--realtime", command)
+        self.assertEqual(command[command.index("--frames") + 1], "3")
+
+    def test_fast_demo_rejects_live_capture(self):
+        with TemporaryDirectory() as folder:
+            with patch("fall_detection.monitor_cli.subprocess.Popen") as popen:
+                with self.assertRaises(SystemExit) as error:
+                    main(["--camera", "0", "--output", str(Path(folder) / "live.jsonl"),
+                          "--demo-fast"])
+                self.assertEqual(error.exception.code, 2)
+                popen.assert_not_called()
+
+    def test_dry_run_reports_command_without_starting_capture(self):
+        with TemporaryDirectory() as folder:
+            output = Path(folder) / "dry.jsonl"
+            with patch("fall_detection.monitor_cli.subprocess.Popen") as popen, \
+                 patch("fall_detection.monitor_cli.create_server") as server, \
+                 patch("builtins.print") as printer:
+                self.assertEqual(main(["--demo", "--dry-run", "--output", str(output)]), 0)
+                popen.assert_not_called()
+                server.assert_not_called()
+                report = json.loads(printer.call_args.args[0])
+                self.assertFalse(report["capture_started"])
+                self.assertEqual(report["mode"], "synthetic")
+                self.assertIn("--frames", report["command"])
+            self.assertFalse(output.exists())
+
+    def test_require_temporal_rejects_missing_models_and_demo(self):
+        with TemporaryDirectory() as folder:
+            output = str(Path(folder) / "strict.jsonl")
+            with patch("fall_detection.monitor_cli.subprocess.Popen") as popen:
+                for options in (["--camera", "0"],
+                                ["--camera", "0", "--model", "pose.onnx"],
+                                ["--demo"]):
+                    with self.subTest(options=options), self.assertRaises(SystemExit) as error:
+                        main([*options, "--require-temporal", "--output", output])
+                    self.assertEqual(error.exception.code, 2)
+                popen.assert_not_called()
+
+    def test_require_temporal_accepts_explicit_existing_artifacts_for_dry_run(self):
+        with TemporaryDirectory() as folder:
+            root = Path(folder)
+            pose = root / "pose.onnx"
+            temporal = root / "temporal.onnx"
+            pose.write_bytes(b"dummy: not used in dry run")
+            temporal.write_bytes(b"dummy: not used in dry run")
+            with patch("fall_detection.monitor_cli.subprocess.Popen") as popen, \
+                 patch("builtins.print") as printer:
+                result = main(["--camera", "0", "--model", str(pose),
+                               "--temporal-model", str(temporal), "--require-temporal",
+                               "--dry-run", "--output", str(root / "stream.jsonl")])
+                self.assertEqual(result, 0)
+                popen.assert_not_called()
+                command = json.loads(printer.call_args.args[0])["command"]
+                self.assertIn(str(pose), command)
+                self.assertIn(str(temporal), command)
 
     def test_child_exit_code_is_propagated(self):
         with TemporaryDirectory() as folder:
