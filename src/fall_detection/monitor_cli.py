@@ -16,6 +16,7 @@ from threading import Thread
 import webbrowser
 
 from .dashboard import create_server
+from .source_probe import SourceProbeError, probe_source
 
 
 def build_live_command(args: argparse.Namespace) -> list[str]:
@@ -73,6 +74,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--require-temporal", action="store_true",
                         help="Require explicit pose and temporal ONNX model paths for a live session")
+    parser.add_argument("--probe-source", action="store_true",
+                        help="Decode one camera/video frame before launch; requires OpenCV (not supported for --demo)")
     parser.add_argument("--dry-run", action="store_true",
                         help="Validate launcher arguments and print the child command without starting capture")
     parser.add_argument("--capture-timeout", type=float, default=None,
@@ -96,6 +99,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.require_temporal and (args.demo or args.model is None or args.temporal_model is None):
         parser.error("--require-temporal needs live capture with explicit --model and --temporal-model")
+    if args.probe_source and args.demo:
+        parser.error("--probe-source requires --camera or --video, not --demo")
     if args.demo_fast and not args.demo:
         parser.error("--demo-fast requires --demo")
     if args.demo and (args.model or args.temporal_model or args.research_alerts or args.latency_report or args.alert_config or args.fallback_fps is not None):
@@ -127,9 +132,22 @@ def main(argv: list[str] | None = None) -> int:
     if args.max_frames is not None and args.max_frames <= 0:
         parser.error("max-frames must be positive")
 
+    source_probe = None
+    if args.probe_source:
+        try:
+            probe = probe_source(args.camera if args.camera is not None else args.video)
+        except (SourceProbeError, OSError, ValueError) as error:
+            print(f"source probe failed: {error}", file=sys.stderr)
+            return 2
+        source_probe = {"source": probe.source, "width": probe.width,
+                        "height": probe.height, "fps": probe.fps}
+        print(f"Capture source ready: {probe.width}x{probe.height} "
+              f"({probe.fps if probe.fps is not None else 'FPS unavailable'} FPS)", flush=True)
+
     if args.dry_run:
         print(json.dumps({"command": build_live_command(args), "output": str(args.output),
-                          "mode": "synthetic" if args.demo else "live", "capture_started": False}))
+                          "mode": "synthetic" if args.demo else "live", "capture_started": False,
+                          "source_probe": source_probe}))
         return 0
 
     server = None
