@@ -23,7 +23,7 @@ class MonitorSourceProbeTests(unittest.TestCase):
                  contextlib.redirect_stdout(stdout):
                 code = main(["--camera", "0", "--output", output, "--probe-source", "--dry-run"])
             self.assertEqual(code, 0)
-            probe.assert_called_once_with(0)
+            probe.assert_called_once_with(0, frames=1)
             server.assert_not_called()
             popen.assert_not_called()
             self.assertEqual(json.loads(stdout.getvalue().splitlines()[-1])["source_probe"]["width"], 1280)
@@ -42,6 +42,24 @@ class MonitorSourceProbeTests(unittest.TestCase):
             self.assertIn("camera busy", stderr.getvalue())
             server.assert_not_called()
             popen.assert_not_called()
+
+    def test_multiframe_probe_reports_count(self):
+        with TemporaryDirectory() as folder:
+            output = str(Path(folder) / 'log.jsonl')
+            stdout = io.StringIO()
+            result = SourceProbeResult('0', 640, 480, 30.0, 5)
+            with patch('fall_detection.monitor_cli.probe_source', return_value=result) as probe:
+                with contextlib.redirect_stdout(stdout):
+                    code = main(['--camera', '0', '--output', output, '--probe-source', '--probe-frames', '5', '--dry-run'])
+            self.assertEqual(code, 0)
+            probe.assert_called_once_with(0, frames=5)
+            self.assertEqual(json.loads(stdout.getvalue().splitlines()[-1])['source_probe']['frames_decoded'], 5)
+
+    def test_multiframe_requires_probe_opt_in(self):
+        with TemporaryDirectory() as folder:
+            with self.assertRaises(SystemExit) as error:
+                main(['--camera', '0', '--output', str(Path(folder) / 'log.jsonl'), '--probe-frames', '5', '--dry-run'])
+            self.assertEqual(error.exception.code, 2)
 
     def test_demo_rejects_probe_before_launch(self):
         with TemporaryDirectory() as folder:

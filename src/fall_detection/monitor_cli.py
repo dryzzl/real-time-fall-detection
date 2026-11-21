@@ -76,6 +76,7 @@ def main(argv: list[str] | None = None) -> int:
                         help="Require explicit pose and temporal ONNX model paths for a live session")
     parser.add_argument("--probe-source", action="store_true",
                         help="Decode one camera/video frame before launch; requires OpenCV (not supported for --demo)")
+    parser.add_argument("--probe-frames", type=int, default=1, help="Consecutive source frames to validate (1-120)")
     parser.add_argument("--dry-run", action="store_true",
                         help="Validate launcher arguments and print the child command without starting capture")
     parser.add_argument("--capture-timeout", type=float, default=None,
@@ -99,6 +100,10 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.require_temporal and (args.demo or args.model is None or args.temporal_model is None):
         parser.error("--require-temporal needs live capture with explicit --model and --temporal-model")
+    if not 1 <= args.probe_frames <= 120:
+        parser.error("--probe-frames must be between 1 and 120")
+    if args.probe_frames != 1 and not args.probe_source:
+        parser.error("--probe-frames requires --probe-source")
     if args.probe_source and args.demo:
         parser.error("--probe-source requires --camera or --video, not --demo")
     if args.demo_fast and not args.demo:
@@ -135,12 +140,12 @@ def main(argv: list[str] | None = None) -> int:
     source_probe = None
     if args.probe_source:
         try:
-            probe = probe_source(args.camera if args.camera is not None else args.video)
+            probe = probe_source(args.camera if args.camera is not None else args.video, frames=args.probe_frames)
         except (SourceProbeError, OSError, ValueError) as error:
             print(f"source probe failed: {error}", file=sys.stderr)
             return 2
         source_probe = {"source": probe.source, "width": probe.width,
-                        "height": probe.height, "fps": probe.fps}
+                        "height": probe.height, "fps": probe.fps, "frames_decoded": probe.frames_decoded}
         print(f"Capture source ready: {probe.width}x{probe.height} "
               f"({probe.fps if probe.fps is not None else 'FPS unavailable'} FPS)", flush=True)
 
