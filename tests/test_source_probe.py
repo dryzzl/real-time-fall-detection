@@ -59,6 +59,15 @@ class SourceProbeTests(unittest.TestCase):
             self.assertEqual(result.source, str(path))
             self.assertIsNone(result.fps)
 
+    def test_multiple_frames_and_boundaries(self):
+        capture = FakeCapture(frame=SimpleNamespace(shape=(720, 1280, 3)))
+        cv2 = SimpleNamespace(VideoCapture=lambda source: capture, CAP_PROP_FPS=5)
+        self.assertEqual(probe_source(0, frames=3, cv2_module=cv2).frames_decoded, 3)
+        self.assertTrue(capture.released)
+        for count in (0, 121, True, 1.5):
+            with self.assertRaises(ValueError):
+                probe_source(0, frames=count)
+
     def test_missing_file_and_negative_camera_rejected(self):
         with self.assertRaises(SourceProbeError):
             probe_source("/no/such/video.mp4")

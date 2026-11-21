@@ -20,14 +20,17 @@ class SourceProbeResult:
     width: int
     height: int
     fps: float | None
+    frames_decoded: int = 1
 
 
-def probe_source(source: int | str | Path, *, cv2_module: Any = None) -> SourceProbeResult:
+def probe_source(source: int | str | Path, *, frames: int = 1, cv2_module: Any = None) -> SourceProbeResult:
     """Decode one frame and release the device even on read failures.
 
     Requires OpenCV only when invoked. A successful probe establishes capture
     readiness at that instant, not inference correctness or future availability.
     """
+    if type(frames) is not int or not 1 <= frames <= 120:
+        raise ValueError('frames must be an integer from 1 to 120')
     if type(source) is int:
         if source < 0:
             raise ValueError("camera index must be nonnegative")
@@ -49,15 +52,16 @@ def probe_source(source: int | str | Path, *, cv2_module: Any = None) -> SourceP
     try:
         if not capture.isOpened():
             raise SourceProbeError(f"cannot open capture source: {capture_arg}")
-        ok, frame = capture.read()
-        if not ok or frame is None or len(getattr(frame, "shape", ())) < 2:
-            raise SourceProbeError(f"capture source did not decode a frame: {capture_arg}")
+        for index in range(frames):
+            ok, frame = capture.read()
+            if not ok or frame is None or len(getattr(frame, 'shape', ())) < 2:
+                raise SourceProbeError(f'capture source did not decode frame {index + 1}/{frames}: {capture_arg}')
         height, width = frame.shape[:2]
         if width <= 0 or height <= 0:
             raise SourceProbeError("decoded frame dimensions must be positive")
         fps_raw = float(capture.get(cv2_module.CAP_PROP_FPS))
         from math import isfinite
         fps = fps_raw if isfinite(fps_raw) and fps_raw > 0 else None
-        return SourceProbeResult(str(capture_arg), int(width), int(height), fps)
+        return SourceProbeResult(str(capture_arg), int(width), int(height), fps, frames)
     finally:
         capture.release()
