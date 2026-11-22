@@ -68,6 +68,23 @@ class SourceProbeTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 probe_source(0, frames=count)
 
+    def test_dimension_change_is_rejected_and_capture_released(self):
+        frames = iter((SimpleNamespace(shape=(480, 640, 3)),
+                       SimpleNamespace(shape=(720, 1280, 3))))
+        capture = FakeCapture()
+        capture.read = lambda: (True, next(frames))
+        cv2 = SimpleNamespace(VideoCapture=lambda source: capture, CAP_PROP_FPS=5)
+        with self.assertRaisesRegex(SourceProbeError, "dimensions changed at frame 2/2"):
+            probe_source(0, frames=2, cv2_module=cv2)
+        self.assertTrue(capture.released)
+
+    def test_zero_sized_frame_rejected_before_success(self):
+        capture = FakeCapture(frame=SimpleNamespace(shape=(0, 640, 3)))
+        cv2 = SimpleNamespace(VideoCapture=lambda source: capture, CAP_PROP_FPS=5)
+        with self.assertRaisesRegex(SourceProbeError, "invalid dimensions"):
+            probe_source(0, cv2_module=cv2)
+        self.assertTrue(capture.released)
+
     def test_missing_file_and_negative_camera_rejected(self):
         with self.assertRaises(SourceProbeError):
             probe_source("/no/such/video.mp4")

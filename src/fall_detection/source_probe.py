@@ -52,10 +52,19 @@ def probe_source(source: int | str | Path, *, frames: int = 1, cv2_module: Any =
     try:
         if not capture.isOpened():
             raise SourceProbeError(f"cannot open capture source: {capture_arg}")
+        expected_dimensions = None
         for index in range(frames):
             ok, frame = capture.read()
             if not ok or frame is None or len(getattr(frame, 'shape', ())) < 2:
                 raise SourceProbeError(f'capture source did not decode frame {index + 1}/{frames}: {capture_arg}')
+            height, width = frame.shape[:2]
+            if width <= 0 or height <= 0:
+                raise SourceProbeError(f'frame {index + 1}/{frames} has invalid dimensions')
+            if expected_dimensions is None:
+                expected_dimensions = (height, width)
+            elif (height, width) != expected_dimensions:
+                raise SourceProbeError(f'capture dimensions changed at frame {index + 1}/{frames}: '
+                                       f'{expected_dimensions[1]}x{expected_dimensions[0]} to {width}x{height}')
         height, width = frame.shape[:2]
         if width <= 0 or height <= 0:
             raise SourceProbeError("decoded frame dimensions must be positive")
