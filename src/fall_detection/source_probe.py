@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from time import perf_counter
 from typing import Any
 
 
@@ -21,6 +22,7 @@ class SourceProbeResult:
     height: int
     fps: float | None
     frames_decoded: int = 1
+    decode_seconds: float | None = None
 
 
 def probe_source(source: int | str | Path, *, frames: int = 1, cv2_module: Any = None) -> SourceProbeResult:
@@ -53,6 +55,7 @@ def probe_source(source: int | str | Path, *, frames: int = 1, cv2_module: Any =
         if not capture.isOpened():
             raise SourceProbeError(f"cannot open capture source: {capture_arg}")
         expected_dimensions = None
+        started = perf_counter()
         for index in range(frames):
             ok, frame = capture.read()
             if not ok or frame is None or len(getattr(frame, 'shape', ())) < 2:
@@ -65,12 +68,11 @@ def probe_source(source: int | str | Path, *, frames: int = 1, cv2_module: Any =
             elif (height, width) != expected_dimensions:
                 raise SourceProbeError(f'capture dimensions changed at frame {index + 1}/{frames}: '
                                        f'{expected_dimensions[1]}x{expected_dimensions[0]} to {width}x{height}')
+        decode_seconds = max(0.0, perf_counter() - started)
         height, width = frame.shape[:2]
-        if width <= 0 or height <= 0:
-            raise SourceProbeError("decoded frame dimensions must be positive")
         fps_raw = float(capture.get(cv2_module.CAP_PROP_FPS))
         from math import isfinite
         fps = fps_raw if isfinite(fps_raw) and fps_raw > 0 else None
-        return SourceProbeResult(str(capture_arg), int(width), int(height), fps, frames)
+        return SourceProbeResult(str(capture_arg), int(width), int(height), fps, frames, decode_seconds)
     finally:
         capture.release()

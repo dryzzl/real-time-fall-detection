@@ -55,6 +55,31 @@ class MonitorSourceProbeTests(unittest.TestCase):
             probe.assert_called_once_with(0, frames=5)
             self.assertEqual(json.loads(stdout.getvalue().splitlines()[-1])['source_probe']['frames_decoded'], 5)
 
+    def test_dry_run_reports_measured_decode_throughput(self):
+        with TemporaryDirectory() as folder:
+            output = str(Path(folder) / "log.jsonl")
+            stdout = io.StringIO()
+            result = SourceProbeResult("0", 640, 480, 30.0, 5, 0.25)
+            with patch("fall_detection.monitor_cli.probe_source", return_value=result), \
+                 contextlib.redirect_stdout(stdout):
+                code = main(["--camera", "0", "--output", output, "--probe-source",
+                             "--probe-frames", "5", "--dry-run"])
+            self.assertEqual(code, 0)
+            report = json.loads(stdout.getvalue().splitlines()[-1])["source_probe"]
+            self.assertEqual(report["decode_seconds"], 0.25)
+            self.assertEqual(report["decode_fps"], 20.0)
+
+    def test_dry_run_handles_unavailable_decode_timing(self):
+        with TemporaryDirectory() as folder:
+            output = str(Path(folder) / "log.jsonl")
+            stdout = io.StringIO()
+            result = SourceProbeResult("0", 640, 480, None, 1)
+            with patch("fall_detection.monitor_cli.probe_source", return_value=result), \
+                 contextlib.redirect_stdout(stdout):
+                self.assertEqual(main(["--camera", "0", "--output", output,
+                                       "--probe-source", "--dry-run"]), 0)
+            self.assertIsNone(json.loads(stdout.getvalue().splitlines()[-1])["source_probe"]["decode_fps"])
+
     def test_multiframe_requires_probe_opt_in(self):
         with TemporaryDirectory() as folder:
             with self.assertRaises(SystemExit) as error:

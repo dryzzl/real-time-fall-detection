@@ -3,6 +3,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 import unittest
+from unittest import mock
 
 from fall_detection.source_probe import SourceProbeError, probe_source
 
@@ -84,6 +85,14 @@ class SourceProbeTests(unittest.TestCase):
         with self.assertRaisesRegex(SourceProbeError, "invalid dimensions"):
             probe_source(0, cv2_module=cv2)
         self.assertTrue(capture.released)
+
+    def test_decode_timing_is_nonnegative_and_measured(self):
+        capture = FakeCapture(frame=SimpleNamespace(shape=(480, 640, 3)))
+        cv2 = SimpleNamespace(VideoCapture=lambda source: capture, CAP_PROP_FPS=5)
+        with mock.patch("fall_detection.source_probe.perf_counter", side_effect=[10.0, 10.25]):
+            result = probe_source(0, frames=4, cv2_module=cv2)
+        self.assertEqual(result.decode_seconds, 0.25)
+        self.assertEqual(result.frames_decoded, 4)
 
     def test_missing_file_and_negative_camera_rejected(self):
         with self.assertRaises(SourceProbeError):
