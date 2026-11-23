@@ -65,7 +65,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-frames", type=int)
     parser.add_argument("--fallback-fps", type=float, default=None,
                         help="FPS to use when camera/video metadata is unavailable (live only)")
-    parser.add_argument("--output", type=Path, required=True, help="New JSONL output; never overwritten")
+    parser.add_argument("--output", type=Path, help="New JSONL output; required unless --probe-only")
     parser.add_argument("--latency-report", type=Path, help="New per-stage timing report (live webcam/video only)")
     parser.add_argument("--hold-seconds", type=float, default=None,
                         help="Keep dashboard available after capture ends (0-3600 seconds)")
@@ -77,6 +77,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--probe-source", action="store_true",
                         help="Decode one camera/video frame before launch; requires OpenCV (not supported for --demo)")
     parser.add_argument("--probe-frames", type=int, default=1, help="Consecutive source frames to validate (1-120)")
+    parser.add_argument("--probe-only", action="store_true",
+                        help="Print camera/video readiness JSON and exit without output, inference, or dashboard")
     parser.add_argument("--dry-run", action="store_true",
                         help="Validate launcher arguments and print the child command without starting capture")
     parser.add_argument("--capture-timeout", type=float, default=None,
@@ -98,6 +100,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.hold_seconds is None:
         args.hold_seconds = 30.0 if args.demo else 0.0
 
+    if args.probe_only and (args.demo or args.dry_run):
+        parser.error("--probe-only requires --camera or --video and cannot combine with --dry-run")
+    if args.probe_only:
+        args.probe_source = True
+    if args.output is None and not args.probe_only:
+        parser.error("--output is required unless --probe-only")
     if args.require_temporal and (args.demo or args.model is None or args.temporal_model is None):
         parser.error("--require-temporal needs live capture with explicit --model and --temporal-model")
     if not 1 <= args.probe_frames <= 120:
@@ -110,7 +118,7 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--demo-fast requires --demo")
     if args.demo and (args.model or args.temporal_model or args.research_alerts or args.latency_report or args.alert_config or args.fallback_fps is not None):
         parser.error("--demo cannot use live inference, alert, or latency options")
-    if args.latency_report is not None and args.output.resolve() == args.latency_report.resolve():
+    if args.latency_report is not None and args.output is not None and args.output.resolve() == args.latency_report.resolve():
         parser.error("--latency-report must differ from --output")
     if args.latency_report is not None and args.latency_report.exists():
         parser.error("latency report already exists; choose a new path")
@@ -120,7 +128,7 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--failure-hold-seconds must be finite and between 0 and 3600")
     if args.capture_timeout is not None and (not isfinite(args.capture_timeout) or args.capture_timeout <= 0):
         parser.error("--capture-timeout must be finite and positive")
-    if args.output.exists():
+    if args.output is not None and args.output.exists():
         parser.error("output already exists; choose a new JSONL path")
     if args.fallback_fps is not None and (not isfinite(args.fallback_fps) or args.fallback_fps <= 0):
         parser.error("--fallback-fps must be finite and positive")
@@ -145,12 +153,18 @@ def main(argv: list[str] | None = None) -> int:
             print(f"source probe failed: {error}", file=sys.stderr)
             return 2
         source_probe = {"source": probe.source, "width": probe.width,
-                        "height": probe.height, "fps": probe.fps, "frames_decoded": probe.frames_decoded,
+                        "height": probe.height, "fps": probe.fps, "channels": probe.channels,
+                        "frames_decoded": probe.frames_decoded,
                         "decode_seconds": probe.decode_seconds,
                         "decode_fps": (probe.frames_decoded / probe.decode_seconds
                                        if probe.decode_seconds is not None and probe.decode_seconds > 0 else None)}
         print(f"Capture source ready: {probe.width}x{probe.height} "
               f"({probe.fps if probe.fps is not None else 'FPS unavailable'} FPS)", flush=True)
+
+    if args.probe_only:
+        print(json.dumps({"mode": "source_probe", "capture_started": False,
+                          "source_probe": source_probe}))
+        return 0
 
     if args.dry_run:
         print(json.dumps({"command": build_live_command(args), "output": str(args.output),

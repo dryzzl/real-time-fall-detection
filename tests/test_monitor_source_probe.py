@@ -80,6 +80,36 @@ class MonitorSourceProbeTests(unittest.TestCase):
                                        "--probe-source", "--dry-run"]), 0)
             self.assertIsNone(json.loads(stdout.getvalue().splitlines()[-1])["source_probe"]["decode_fps"])
 
+    def test_probe_only_requires_no_output_and_never_starts_server(self):
+        stdout = io.StringIO()
+        result = SourceProbeResult("0", 640, 480, 30.0, 3, 0.15)
+        with patch("fall_detection.monitor_cli.probe_source", return_value=result) as probe, \\
+             patch("fall_detection.monitor_cli.create_server") as server, \\
+             patch("fall_detection.monitor_cli.subprocess.Popen") as popen, \\
+             contextlib.redirect_stdout(stdout):
+            code = main(["--camera", "0", "--probe-only", "--probe-frames", "3"])
+        self.assertEqual(code, 0)
+        probe.assert_called_once_with(0, frames=3)
+        server.assert_not_called()
+        popen.assert_not_called()
+        report = json.loads(stdout.getvalue().splitlines()[-1])
+        self.assertEqual(report["mode"], "source_probe")
+        self.assertFalse(report["capture_started"])
+        self.assertEqual(report["source_probe"]["channels"], 3)
+        self.assertEqual(report["source_probe"]["decode_fps"], 20.0)
+
+    def test_probe_only_rejects_demo_and_dry_run(self):
+        for argv in (["--demo", "--probe-only"],
+                     ["--camera", "0", "--probe-only", "--dry-run"]):
+            with self.subTest(argv=argv), self.assertRaises(SystemExit) as error:
+                main(argv)
+            self.assertEqual(error.exception.code, 2)
+
+    def test_live_launch_still_requires_output(self):
+        with self.assertRaises(SystemExit) as error:
+            main(["--camera", "0", "--dry-run"])
+        self.assertEqual(error.exception.code, 2)
+
     def test_multiframe_requires_probe_opt_in(self):
         with TemporaryDirectory() as folder:
             with self.assertRaises(SystemExit) as error:
