@@ -94,6 +94,20 @@ class SourceProbeTests(unittest.TestCase):
         self.assertEqual(result.decode_seconds, 0.25)
         self.assertEqual(result.frames_decoded, 4)
 
+    def test_grayscale_and_bgra_frames_are_rejected(self):
+        for shape in ((480, 640), (480, 640, 4), (480, 640, 1)):
+            with self.subTest(shape=shape):
+                capture = FakeCapture(frame=SimpleNamespace(shape=shape))
+                cv2 = SimpleNamespace(VideoCapture=lambda source: capture, CAP_PROP_FPS=5)
+                with self.assertRaisesRegex(SourceProbeError, "3-channel BGR"):
+                    probe_source(0, cv2_module=cv2)
+                self.assertTrue(capture.released)
+
+    def test_probe_reports_three_channels(self):
+        capture = FakeCapture(frame=SimpleNamespace(shape=(480, 640, 3)))
+        cv2 = SimpleNamespace(VideoCapture=lambda source: capture, CAP_PROP_FPS=5)
+        self.assertEqual(probe_source(0, cv2_module=cv2).channels, 3)
+
     def test_missing_file_and_negative_camera_rejected(self):
         with self.assertRaises(SourceProbeError):
             probe_source("/no/such/video.mp4")

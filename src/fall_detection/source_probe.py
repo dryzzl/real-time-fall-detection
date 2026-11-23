@@ -1,6 +1,6 @@
 """Explicit opt-in capture readiness probe for research video sources.
 
-A probe opens a camera or video, decodes exactly one frame, and closes it.
+A probe opens a camera or video, decodes requested frames, and closes it.
 It does not load model weights or make fall-detection claims.
 """
 from __future__ import annotations
@@ -23,10 +23,11 @@ class SourceProbeResult:
     fps: float | None
     frames_decoded: int = 1
     decode_seconds: float | None = None
+    channels: int = 3
 
 
 def probe_source(source: int | str | Path, *, frames: int = 1, cv2_module: Any = None) -> SourceProbeResult:
-    """Decode one frame and release the device even on read failures.
+    """Decode consecutive BGR frames and release the device even on failures.
 
     Requires OpenCV only when invoked. A successful probe establishes capture
     readiness at that instant, not inference correctness or future availability.
@@ -60,7 +61,10 @@ def probe_source(source: int | str | Path, *, frames: int = 1, cv2_module: Any =
             ok, frame = capture.read()
             if not ok or frame is None or len(getattr(frame, 'shape', ())) < 2:
                 raise SourceProbeError(f'capture source did not decode frame {index + 1}/{frames}: {capture_arg}')
-            height, width = frame.shape[:2]
+            shape = frame.shape
+            if len(shape) != 3 or shape[2] != 3:
+                raise SourceProbeError(f'frame {index + 1}/{frames} must be 3-channel BGR; got shape {shape}')
+            height, width = shape[:2]
             if width <= 0 or height <= 0:
                 raise SourceProbeError(f'frame {index + 1}/{frames} has invalid dimensions')
             if expected_dimensions is None:
@@ -73,6 +77,6 @@ def probe_source(source: int | str | Path, *, frames: int = 1, cv2_module: Any =
         fps_raw = float(capture.get(cv2_module.CAP_PROP_FPS))
         from math import isfinite
         fps = fps_raw if isfinite(fps_raw) and fps_raw > 0 else None
-        return SourceProbeResult(str(capture_arg), int(width), int(height), fps, frames, decode_seconds)
+        return SourceProbeResult(str(capture_arg), int(width), int(height), fps, frames, decode_seconds, 3)
     finally:
         capture.release()
