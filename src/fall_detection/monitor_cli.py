@@ -159,7 +159,7 @@ def main(argv: list[str] | None = None) -> int:
                         "decode_fps": (probe.frames_decoded / probe.decode_seconds
                                        if probe.decode_seconds is not None and probe.decode_seconds > 0 else None)}
         print(f"Capture source ready: {probe.width}x{probe.height} "
-              f"({probe.fps if probe.fps is not None else 'FPS unavailable'} FPS)", flush=True)
+              f"({probe.fps if probe.fps is not None else 'FPS unavailable'} FPS)", flush=True, file=sys.stderr)
 
     if args.probe_only:
         print(json.dumps({"mode": "source_probe", "capture_started": False,
