@@ -103,6 +103,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.probe_only and (args.demo or args.dry_run):
         parser.error("--probe-only requires --camera or --video and cannot combine with --dry-run")
     if args.probe_only:
+        if (args.model is not None or args.temporal_model is not None or args.require_temporal
+                or args.research_alerts or args.alert_config is not None or args.latency_report is not None
+                or args.output is not None or args.open_browser):
+            parser.error("--probe-only cannot use inference, alert, output, or browser options")
         args.probe_source = True
     if args.output is None and not args.probe_only:
         parser.error("--output is required unless --probe-only")

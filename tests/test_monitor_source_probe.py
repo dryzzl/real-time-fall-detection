@@ -105,6 +105,17 @@ class MonitorSourceProbeTests(unittest.TestCase):
                 main(argv)
             self.assertEqual(error.exception.code, 2)
 
+    def test_probe_only_rejects_options_that_would_be_silently_ignored(self):
+        for options in (["--model", "pose.onnx"], ["--temporal-model", "state.onnx"],
+                        ["--research-alerts"], ["--output", "unused.jsonl"],
+                        ["--open-browser"], ["--latency-report", "timing.json"]):
+            with self.subTest(options=options):
+                with patch("fall_detection.monitor_cli.probe_source") as probe:
+                    with self.assertRaises(SystemExit) as error:
+                        main(["--camera", "0", "--probe-only", *options])
+                    self.assertEqual(error.exception.code, 2)
+                    probe.assert_not_called()
+
     def test_live_launch_still_requires_output(self):
         with self.assertRaises(SystemExit) as error:
             main(["--camera", "0", "--dry-run"])
