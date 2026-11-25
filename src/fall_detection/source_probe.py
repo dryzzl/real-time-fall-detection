@@ -64,6 +64,8 @@ def probe_source(source: int | str | Path, *, frames: int = 1, cv2_module: Any =
             shape = frame.shape
             if len(shape) != 3 or shape[2] != 3:
                 raise SourceProbeError(f'frame {index + 1}/{frames} must be 3-channel BGR; got shape {shape}')
+            if getattr(frame, 'dtype', None) is not None and str(frame.dtype) != 'uint8':
+                raise SourceProbeError(f'frame {index + 1}/{frames} must use uint8 pixels; got {frame.dtype}')
             height, width = shape[:2]
             if width <= 0 or height <= 0:
                 raise SourceProbeError(f'frame {index + 1}/{frames} has invalid dimensions')

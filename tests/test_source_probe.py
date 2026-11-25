@@ -103,6 +103,13 @@ class SourceProbeTests(unittest.TestCase):
                     probe_source(0, cv2_module=cv2)
                 self.assertTrue(capture.released)
 
+    def test_non_uint8_pixels_rejected(self):
+        capture = FakeCapture(frame=SimpleNamespace(shape=(480, 640, 3), dtype='float32'))
+        cv2 = SimpleNamespace(VideoCapture=lambda source: capture, CAP_PROP_FPS=5)
+        with self.assertRaisesRegex(SourceProbeError, 'uint8 pixels'):
+            probe_source(0, cv2_module=cv2)
+        self.assertTrue(capture.released)
+
     def test_probe_reports_three_channels(self):
         capture = FakeCapture(frame=SimpleNamespace(shape=(480, 640, 3)))
         cv2 = SimpleNamespace(VideoCapture=lambda source: capture, CAP_PROP_FPS=5)
