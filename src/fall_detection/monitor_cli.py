@@ -74,6 +74,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--require-temporal", action="store_true",
                         help="Require explicit pose and temporal ONNX model paths for a live session")
+    parser.add_argument("--check-models", action="store_true", help="Run model preflight before starting dashboard or capture")
     parser.add_argument("--probe-source", action="store_true",
                         help="Decode one camera/video frame before launch; requires OpenCV (not supported for --demo)")
     parser.add_argument("--probe-frames", type=int, default=1, help="Consecutive source frames to validate (1-120)")
@@ -100,6 +101,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.hold_seconds is None:
         args.hold_seconds = 30.0 if args.demo else 0.0
 
+    if args.check_models and (args.demo or args.probe_only or args.dry_run):
+        parser.error("--check-models requires live launch without --probe-only or --dry-run")
     if args.probe_only and (args.demo or args.dry_run):
         parser.error("--probe-only requires --camera or --video and cannot combine with --dry-run")
     if args.probe_only:
@@ -148,6 +151,12 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("camera index must be nonnegative")
     if args.max_frames is not None and args.max_frames <= 0:
         parser.error("max-frames must be positive")
+
+    if args.check_models:
+        result = subprocess.run([*build_live_command(args), "--check-models"], stdout=subprocess.PIPE, text=True)
+        if result.returncode != 0:
+            return result.returncode
+        print(result.stdout, file=sys.stderr, end="")
 
     source_probe = None
     if args.probe_source:
