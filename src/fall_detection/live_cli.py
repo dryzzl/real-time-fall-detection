@@ -38,6 +38,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--tracker-config", type=Path, default=Path("configs/tracker.toml"))
     parser.add_argument("--feature-config", type=Path, default=Path("configs/features.toml"))
     parser.add_argument("--state-config", type=Path, default=Path("configs/state.toml"))
+    parser.add_argument("--check-models", action="store_true", help="Load model contracts and run a blank-frame pose smoke test without opening capture")
     parser.add_argument("--max-frames", type=int)
     parser.add_argument("--fallback-fps", type=float, default=30.0)
     parser.add_argument("--output", type=Path, help="Write new JSONL file; never overwrite")
@@ -71,6 +72,14 @@ def main(argv: list[str] | None = None) -> int:
             temporal = OnnxTemporalClassifier(args.temporal_model, training)
         if pose.config.keypoint_count != features.keypoint_count:
             raise ValueError("pose and feature keypoint counts must match")
+        if args.check_models:
+            from .contracts import FramePacket
+            detections = pose.estimate(FramePacket(0, 0.0, 64, 64, bytes(64 * 64 * 3)))
+            print(json.dumps({"mode": "model_preflight", "pose": pose.describe(),
+                              "blank_frame_detections": len(detections),
+                              "temporal_contract_checked": temporal is not None,
+                              "accuracy_validated": False}, allow_nan=False))
+            return 0
         with ExitStack() as stack:
             frames = stack.enter_context(open_capture(capture))
             preview = stack.enter_context(LivePreview(temporal_model=temporal is not None)) if args.preview else None
