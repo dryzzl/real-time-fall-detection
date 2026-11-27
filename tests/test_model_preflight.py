@@ -38,3 +38,13 @@ class ModelPreflightTests(unittest.TestCase):
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as error:
             main([])
         self.assertEqual(error.exception.code, 2)
+
+    def test_preflight_rejects_ignored_capture_options(self):
+        for option in (["--output", "unused.jsonl"], ["--latency-report", "unused.json"],
+                       ["--preview"], ["--research-alerts"], ["--max-frames", "2"]):
+            with self.subTest(option=option), contextlib.redirect_stderr(io.StringIO()), \
+                 patch("fall_detection.live_cli.OnnxPoseEstimator") as factory, \
+                 self.assertRaises(SystemExit) as error:
+                main(["--check-models", *option])
+            self.assertEqual(error.exception.code, 2)
+            factory.assert_not_called()

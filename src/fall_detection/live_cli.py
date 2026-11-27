@@ -51,6 +51,10 @@ def main(argv: list[str] | None = None) -> int:
     if not args.check_models and args.camera is None and args.video is None:
         parser.error("--camera or --video is required for live inference")
 
+    if args.check_models and (args.output is not None or args.latency_report is not None
+                              or args.preview or args.research_alerts or args.max_frames is not None):
+        parser.error("--check-models cannot be combined with capture output, preview, alerts or frame limits")
+
     try:
         if (args.output is not None and args.latency_report is not None
                 and args.output.resolve() == args.latency_report.resolve()):
