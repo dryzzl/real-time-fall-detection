@@ -22,3 +22,19 @@ class ModelPreflightTests(unittest.TestCase):
             report = json.loads(output.getvalue())
             self.assertFalse(report["accuracy_validated"])
             self.assertFalse(report["temporal_contract_checked"])
+
+    def test_preflight_requires_no_capture_source(self):
+        with patch("fall_detection.live_cli.OnnxPoseEstimator") as factory, \
+             patch("fall_detection.live_cli.CaptureConfig") as capture_config, \
+             contextlib.redirect_stdout(io.StringIO()):
+            pose = factory.return_value
+            pose.config.keypoint_count = 17
+            pose.describe.return_value = {}
+            pose.estimate.return_value = ()
+            self.assertEqual(main(["--check-models"]), 0)
+            capture_config.assert_not_called()
+
+    def test_live_requires_source(self):
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as error:
+            main([])
+        self.assertEqual(error.exception.code, 2)

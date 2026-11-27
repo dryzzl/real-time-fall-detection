@@ -24,7 +24,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="ONNX pose + tracked heuristic states (NOT a validated fall detector)"
     )
-    source = parser.add_mutually_exclusive_group(required=True)
+    source = parser.add_mutually_exclusive_group()
     source.add_argument("--camera", type=int, help="Local webcam index, usually 0")
     source.add_argument("--video", type=Path, help="Existing local video file")
     parser.add_argument("--model", type=Path, help="Raw YOLO11-Pose ONNX export")
@@ -48,6 +48,9 @@ def main(argv: list[str] | None = None) -> int:
     display.add_argument("--headless", action="store_true", help="No window (default)")
     args = parser.parse_args(argv)
 
+    if not args.check_models and args.camera is None and args.video is None:
+        parser.error("--camera or --video is required for live inference")
+
     try:
         if (args.output is not None and args.latency_report is not None
                 and args.output.resolve() == args.latency_report.resolve()):
@@ -55,10 +58,6 @@ def main(argv: list[str] | None = None) -> int:
         profiler = FrameLatencyCollector() if args.latency_report is not None else None
         alert_manager = (AlertManager(load_alert_config(args.alert_config))
                          if args.research_alerts else None)
-        capture = CaptureConfig(
-            camera=args.camera, video=args.video,
-            max_frames=args.max_frames, fallback_fps=args.fallback_fps,
-        )
         pose = OnnxPoseEstimator(load_pose_config(args.pose_config, model_path=args.model))
         tracker = load_tracker_config(args.tracker_config)
         features = load_feature_config(args.feature_config)
@@ -80,6 +79,10 @@ def main(argv: list[str] | None = None) -> int:
                               "temporal_contract_checked": temporal is not None,
                               "accuracy_validated": False}, allow_nan=False))
             return 0
+        capture = CaptureConfig(
+            camera=args.camera, video=args.video,
+            max_frames=args.max_frames, fallback_fps=args.fallback_fps,
+        )
         with ExitStack() as stack:
             frames = stack.enter_context(open_capture(capture))
             preview = stack.enter_context(LivePreview(temporal_model=temporal is not None)) if args.preview else None
