@@ -24,7 +24,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="ONNX pose + tracked heuristic states (NOT a validated fall detector)"
     )
-    source = parser.add_mutually_exclusive_group(required=True)
+    source = parser.add_mutually_exclusive_group()
     source.add_argument("--camera", type=int, help="Local webcam index, usually 0")
     source.add_argument("--video", type=Path, help="Existing local video file")
     parser.add_argument("--model", type=Path, help="Raw YOLO11-Pose ONNX export")
@@ -38,6 +38,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--tracker-config", type=Path, default=Path("configs/tracker.toml"))
     parser.add_argument("--feature-config", type=Path, default=Path("configs/features.toml"))
     parser.add_argument("--state-config", type=Path, default=Path("configs/state.toml"))
+    parser.add_argument("--check-models", action="store_true", help="Load model contracts and run a blank-frame pose smoke test without opening capture")
     parser.add_argument("--max-frames", type=int)
     parser.add_argument("--fallback-fps", type=float, default=30.0)
     parser.add_argument("--output", type=Path, help="Write new JSONL file; never overwrite")
@@ -47,6 +48,13 @@ def main(argv: list[str] | None = None) -> int:
     display.add_argument("--headless", action="store_true", help="No window (default)")
     args = parser.parse_args(argv)
 
+    if not args.check_models and args.camera is None and args.video is None:
+        parser.error("--camera or --video is required for live inference")
+
+    if args.check_models and (args.output is not None or args.latency_report is not None
+                              or args.preview or args.research_alerts or args.max_frames is not None):
+        parser.error("--check-models cannot be combined with capture output, preview, alerts or frame limits")
+
     try:
         if (args.output is not None and args.latency_report is not None
                 and args.output.resolve() == args.latency_report.resolve()):
@@ -54,10 +62,6 @@ def main(argv: list[str] | None = None) -> int:
         profiler = FrameLatencyCollector() if args.latency_report is not None else None
         alert_manager = (AlertManager(load_alert_config(args.alert_config))
                          if args.research_alerts else None)
-        capture = CaptureConfig(
-            camera=args.camera, video=args.video,
-            max_frames=args.max_frames, fallback_fps=args.fallback_fps,
-        )
         pose = OnnxPoseEstimator(load_pose_config(args.pose_config, model_path=args.model))
         tracker = load_tracker_config(args.tracker_config)
         features = load_feature_config(args.feature_config)
@@ -71,6 +75,18 @@ def main(argv: list[str] | None = None) -> int:
             temporal = OnnxTemporalClassifier(args.temporal_model, training)
         if pose.config.keypoint_count != features.keypoint_count:
             raise ValueError("pose and feature keypoint counts must match")
+        if args.check_models:
+            from .contracts import FramePacket
+            detections = pose.estimate(FramePacket(0, 0.0, 64, 64, bytes(64 * 64 * 3)))
+            print(json.dumps({"mode": "model_preflight", "pose": pose.describe(),
+                              "blank_frame_detections": len(detections),
+                              "temporal_contract_checked": temporal is not None,
+                              "accuracy_validated": False}, allow_nan=False))
+            return 0
+        capture = CaptureConfig(
+            camera=args.camera, video=args.video,
+            max_frames=args.max_frames, fallback_fps=args.fallback_fps,
+        )
         with ExitStack() as stack:
             frames = stack.enter_context(open_capture(capture))
             preview = stack.enter_context(LivePreview(temporal_model=temporal is not None)) if args.preview else None
